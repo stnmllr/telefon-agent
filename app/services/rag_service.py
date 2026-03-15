@@ -3,23 +3,32 @@ import google.auth
 import google.auth.transport.requests
 import requests as http_requests
 from langchain_google_vertexai import ChatVertexAI
-from langchain.schema import HumanMessage
+from langchain.schema import HumanMessage, SystemMessage, AIMessage
 from app.config import settings
+from app.services.memory_service import get_history, save_message
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Du bist ein freundlicher Telefon-Assistent.
-Antworte AUSSCHLIESSLICH auf Basis der folgenden Kontext-Dokumente aus unseren Handbüchern.
-Halte dich kurz (max. 2–3 Sätze). Antworte auf Deutsch.
-Wenn die Antwort NICHT im Kontext steht, sage genau:
-"Das kann ich leider nicht beantworten. Ich verbinde Sie gerne mit einem Mitarbeiter weiter."
+SYSTEM_PROMPT = """Du bist ein freundlicher, geduldiger Telefon-Support-Assistent für die Software syska ProFI Fibu.
 
-KONTEXT:
-{context}
+DEINE AUFGABE:
+- Beantworte Fragen AUSSCHLIESSLICH auf Basis der KONTEXT-Dokumente aus den Handbüchern.
+- Führe den User Schritt für Schritt durch Prozesse – wie ein geduldiger Kollege am Telefon.
+- Antworte immer auf Deutsch, klar und verständlich.
+- Halte Antworten kurz genug für ein Telefongespräch (max. 4 Sätze pro Antwort).
 
-FRAGE: {question}
+GESPRÄCHSFÜHRUNG:
+- Bei Prozessfragen (Wie mache ich X?): Erkläre Schritt 1, frage dann ob der User diesen Schritt gemacht hat.
+- Bei Verständnisfragen (Was ist X?): Erkläre direkt und präzise.
+- Bei Folgefragen: Beziehe dich auf den bisherigen Gesprächsverlauf.
+- Frage am Ende jeder Antwort: "Konnten Sie das so umsetzen?" oder "Ist das verständlich?"
 
-ANTWORT:"""
+WICHTIG:
+- Wenn die Antwort NICHT im Kontext steht: "Das steht leider nicht in meinen Unterlagen. Ich verbinde Sie mit einem Kollegen."
+- Niemals erfinden oder raten – nur aus dem Kontext antworten.
+
+KONTEXT AUS DEN HANDBÜCHERN:
+{context}"""
 
 
 def _get_access_token() -> str:
@@ -42,10 +51,6 @@ def _search_datastore(question: str) -> str:
         "pageSize": settings.rag_top_k,
         "contentSearchSpec": {
             "snippetSpec": {"returnSnippet": True},
-            "summarySpec": {
-                "summaryResultCount": 3,
-                "languageCode": "de"
-            },
         },
     }
     headers = {
@@ -57,34 +62,34 @@ def _search_datastore(question: str) -> str:
     resp.raise_for_status()
     data = resp.json()
 
-    # Snippets sammeln
     passages = []
     for result in data.get("results", []):
         derived = result.get("document", {}).get("derivedStructData", {})
         for sn in derived.get("snippets", []):
             if sn.get("snippet"):
-                passages.append(sn["snippet"])
+                # HTML-Tags entfernen
+                text = sn["snippet"].replace("<b>", "").replace("</b>", "")
+                passages.append(text)
 
-    summary = data.get("summary", {}).get("summaryText", "")
     context = "\n\n".join(passages)
-
-    logger.info("Passagen: %d | Summary: %s", len(passages), summary[:100] if summary else "–")
-    logger.info("Kontext: %s", context[:300] if context else "LEER")
-    return context, summary
+    logger.info("Passagen: %d | Kontext: %s", len(passages), context[:300] if context else "LEER")
+    return context
 
 
 async def answer_question(question: str, call_sid: str = "") -> str:
     try:
         logger.info("RAG-Abfrage | CallSid=%s | Frage='%s'", call_sid, question)
-        context, summary = _search_datastore(question)
 
-        if summary:
-            logger.info("Nutze Summary: %s", summary[:100])
-            return summary
+        # Kontext aus Handbüchern laden
+        context = _search_datastore(question)
 
         if not context:
-            return "Das kann ich leider nicht beantworten. Ich verbinde Sie gerne mit einem Mitarbeiter weiter."
+            return "Das steht leider nicht in meinen Unterlagen. Ich verbinde Sie gerne mit einem Kollegen weiter."
 
+        # Gesprächsverlauf laden
+        history = get_history(call_sid)
+
+        # LLM aufrufen
         llm = ChatVertexAI(
             model_name=settings.gemini_model,
             project=settings.gcp_project_id,
@@ -92,10 +97,26 @@ async def answer_question(question: str, call_sid: str = "") -> str:
             temperature=settings.llm_temperature,
             max_output_tokens=settings.rag_max_tokens,
         )
-        prompt = SYSTEM_PROMPT.format(context=context, question=question)
-        response = await llm.ainvoke([HumanMessage(content=prompt)])
+
+        # Nachrichten aufbauen: System + History + aktuelle Frage
+        messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]
+
+        for msg in history:
+            if msg["role"] == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                messages.append(AIMessage(content=msg["content"]))
+
+        messages.append(HumanMessage(content=question))
+
+        response = await llm.ainvoke(messages)
         answer = response.content.strip()
-        logger.info("RAG-Antwort | CallSid=%s | Antwort='%s'", call_sid, answer[:100])
+
+        # Gesprächsverlauf speichern
+        save_message(call_sid, "user", question)
+        save_message(call_sid, "assistant", answer)
+
+        logger.info("RAG-Antwort | CallSid=%s | Antwort='%s'", call_sid, answer[:150])
         return answer
 
     except Exception as e:

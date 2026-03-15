@@ -17,3 +17,4 @@ twilio==9.3.0
 
 # Forms
 python-multipart==0.0.9
+google-cloud-firestore==2.19.0
