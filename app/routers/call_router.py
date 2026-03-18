@@ -20,8 +20,7 @@ from app.utils.twiml_builder import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-FAREWELL_KEYWORDS = ["nein", "nein danke", "tschüss", "auf wiederhören", "danke", "beenden", "nichts"]
-AFFIRMATIVE_KEYWORDS = ["ja", "ja bitte", "noch eine", "weiter"]
+FAREWELL_KEYWORDS = ["nein danke", "tschüss", "auf wiederhören", "beenden", "kein weiteres"]
 
 
 @router.post("/incoming")
@@ -58,23 +57,15 @@ async def transcribe(
         )
         return Response(content=twiml, media_type="application/xml")
 
-    # Gesprächssteuerung — Abschied erkennen
+    # Nur Abschied abfangen — alles andere geht in die RAG-Pipeline
     speech_lower = SpeechResult.lower().strip()
     if any(keyword in speech_lower for keyword in FAREWELL_KEYWORDS):
         logger.info("CallSid=%s | Abschied erkannt.", CallSid)
         twiml = build_farewell_twiml()
         return Response(content=twiml, media_type="application/xml")
 
-    # Gesprächssteuerung — "Ja, weitere Frage" erkennen
-    if any(keyword in speech_lower for keyword in AFFIRMATIVE_KEYWORDS) and len(SpeechResult.split()) <= 3:
-        logger.info("CallSid=%s | Affirmation erkannt.", CallSid)
-        twiml = build_answer_twiml(
-            answer="Natürlich, was kann ich für Sie tun?",
-            transcribe_url="/call/transcribe",
-        )
-        return Response(content=twiml, media_type="application/xml")
-
-    # RAG → LLM Antwort generieren
+    # RAG → LLM — auch "Ja" und "Weiter" landen hier
+    # Gemini nutzt den Gesprächsverlauf aus Firestore und weiß wo wir waren
     answer = await answer_question(question=SpeechResult, call_sid=CallSid)
     twiml = build_answer_twiml(
         answer=answer,
