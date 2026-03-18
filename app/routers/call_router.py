@@ -49,14 +49,12 @@ async def transcribe(
         )
         return Response(content=twiml, media_type="application/xml")
 
-    # Nur Abschied abfangen — alles andere geht in die RAG-Pipeline
     speech_lower = SpeechResult.lower().strip()
     if any(keyword in speech_lower for keyword in FAREWELL_KEYWORDS):
         logger.info("CallSid=%s | Abschied erkannt.", CallSid)
         twiml = build_farewell_twiml()
         return Response(content=twiml, media_type="application/xml")
 
-    # RAG → LLM
     answer = await answer_question(question=SpeechResult, call_sid=CallSid)
     twiml = build_answer_twiml(
         answer=answer,
