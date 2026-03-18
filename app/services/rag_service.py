@@ -57,7 +57,6 @@ WICHTIG:
 KONTEXT AUS DEN HANDBÜCHERN UND WISSENSDATENBANK:
 {context}"""
 
-# Kurze Antworten die keinen neuen RAG-Suchkontext brauchen
 SHORT_RESPONSES = ["ja", "nein", "ok", "okay", "erledigt", "gemacht", "nicht",
                    "klappt nicht", "funktioniert nicht", "verstanden", "gut"]
 
@@ -70,25 +69,30 @@ def _get_access_token() -> str:
 
 
 def _build_search_query(question: str, history: list) -> str:
-    """
-    Reichert kurze Antworten (Ja/Nein) mit dem letzten Thema aus der History an,
-    damit Vertex AI Search den richtigen Kontext findet.
-    """
     q_lower = question.lower().strip()
     is_short = any(q_lower == kw or q_lower.startswith(kw)
                    for kw in SHORT_RESPONSES) and len(question.split()) <= 4
 
     if is_short and history:
-        # Letzten Agenten-Turn als Suchbasis nehmen
+        # Erst letzte Agenten-Antwort versuchen
         last_assistant = next(
             (m["content"] for m in reversed(history) if m["role"] == "assistant"),
             None
         )
         if last_assistant:
-            # Ersten Satz der letzten Antwort als Suchkontext verwenden
             first_sentence = last_assistant.split(".")[0][:150]
             enriched = f"{first_sentence} {question}"
-            logger.info("Suchanfrage angereichert: '%s'", enriched)
+            logger.info("Suchanfrage angereichert (Assistant): '%s'", enriched)
+            return enriched
+
+        # Fallback: letzte User-Frage nehmen
+        last_user = next(
+            (m["content"] for m in reversed(history) if m["role"] == "user"),
+            None
+        )
+        if last_user and len(last_user.split()) > 4:
+            enriched = f"{last_user} {question}"
+            logger.info("Suchanfrage angereichert (User-Fallback): '%s'", enriched)
             return enriched
 
     return question
@@ -122,11 +126,9 @@ def _search_datastore(question: str) -> str:
     passages = []
     for result in data.get("results", []):
         derived = result.get("document", {}).get("derivedStructData", {})
-        # Extractive answers bevorzugen (präziser)
         for ea in derived.get("extractive_answers", []):
             if ea.get("content"):
                 passages.append(ea["content"])
-        # Snippets als Fallback
         if not passages:
             for sn in derived.get("snippets", []):
                 if sn.get("snippet"):
@@ -142,8 +144,11 @@ async def answer_question(question: str, call_sid: str = "") -> str:
     try:
         logger.info("RAG-Abfrage | CallSid=%s | Frage='%s'", call_sid, question)
 
-        # Gesprächsverlauf laden (vor der Suche — für Query-Anreicherung)
+        # Gesprächsverlauf laden
         history = get_history(call_sid)
+
+        # User-Nachricht SOFORT speichern — vor dem LLM-Aufruf
+        save_message(call_sid, "user", question)
 
         # Suchanfrage anreichern bei kurzen Antworten
         search_query = _build_search_query(question, history)
@@ -152,7 +157,6 @@ async def answer_question(question: str, call_sid: str = "") -> str:
         context = _search_datastore(search_query)
 
         if not context:
-            # Kein Kontext — trotzdem mit History antworten lassen
             context = "Kein spezifischer Kontext gefunden."
 
         # LLM aufrufen
@@ -164,7 +168,6 @@ async def answer_question(question: str, call_sid: str = "") -> str:
             max_output_tokens=settings.rag_max_tokens,
         )
 
-        # Nachrichten aufbauen: System + History + aktuelle Frage
         messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]
 
         for msg in history:
@@ -178,8 +181,7 @@ async def answer_question(question: str, call_sid: str = "") -> str:
         response = await llm.ainvoke(messages)
         answer = response.content.strip()
 
-        # Gesprächsverlauf speichern
-        save_message(call_sid, "user", question)
+        # Nur Agenten-Antwort speichern — User wurde bereits oben gespeichert
         save_message(call_sid, "assistant", answer)
 
         logger.info("RAG-Antwort | CallSid=%s | Antwort='%s'", call_sid, answer[:150])
