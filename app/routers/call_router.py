@@ -22,6 +22,21 @@ router = APIRouter()
 
 FAREWELL_KEYWORDS = ["nein danke", "tschüss", "auf wiederhören", "beenden", "kein weiteres"]
 
+# Nach der Farewell-Prüfung, vor dem RAG-Aufruf einfügen:
+
+# Kurze Antworten (Ja/Nein/OK) nur mit Gesprächshistory verarbeiten
+SHORT_RESPONSES = ["ja", "nein", "ok", "okay", "erledigt", "gemacht", "nicht", 
+                   "klappt nicht", "funktioniert nicht", "verstanden"]
+
+if any(speech_lower == keyword or speech_lower.startswith(keyword) 
+       for keyword in SHORT_RESPONSES) and len(SpeechResult.split()) <= 4:
+    logger.info("CallSid=%s | Kurze Antwort erkannt, nutze Konversationskontext.", CallSid)
+    answer = await answer_question(
+        question=f"Der User antwortet auf deine letzte Aussage: '{SpeechResult}'",
+        call_sid=CallSid
+    )
+    twiml = build_answer_twiml(answer=answer, transcribe_url="/call/transcribe")
+    return Response(content=twiml, media_type="application/xml")
 
 @router.post("/incoming")
 async def incoming_call(request: Request):
