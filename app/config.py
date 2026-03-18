@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Vertex AI
     gemini_model: str = "gemini-1.5-pro-002"
-    vertex_search_datastore: str = "projects/{project}/locations/global/collections/default_collection/dataStores/handbuecher"
+    vertex_search_datastore: str = "handbuecher-v2"
 
     # Twilio
     twilio_account_sid: str = ""
