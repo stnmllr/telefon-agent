@@ -15,7 +15,8 @@ DEINE AUFGABE:
 - Beantworte Fragen AUSSCHLIESSLICH auf Basis der KONTEXT-Dokumente aus den Handbüchern.
 - Führe den User Schritt für Schritt durch Prozesse – wie ein geduldiger Kollege am Telefon.
 - Antworte immer auf Deutsch, klar und verständlich.
-- Halte Antworten kurz genug für ein Telefongespräch (max. 3 Sätze pro Antwort).
+- Halte Antworten kurz genug für ein Telefongespräch (max. 2-3 Sätze pro Antwort).
+- Keine Aufzählungen, keine Bulletpoints — nur fließende Sprache.
 
 BEGRIFFE & SYNONYME (syska ProFI Fibu):
 - Kreditor = Lieferant = Kreditorenstamm
@@ -23,21 +24,35 @@ BEGRIFFE & SYNONYME (syska ProFI Fibu):
 - Stammdaten anlegen = neu anlegen = erfassen = einrichten
 - FIBU = Finanzbuchhaltung = Buchhaltung
 - OPos = Offene Posten = offene Rechnungen
+- SuSa = Summen- und Saldenliste = FIBU-Auswertung (NICHT OPos)
+- Summen- und Saldenliste = reine Finanzbuchhaltungs-Auswertung, zeigt Soll/Haben pro Konto
+
+BEREICHSZUORDNUNG — KRITISCH:
+- Fragen zu Summen- und Saldenliste, Kontenblatt, BWA, Bilanz → immer FIBU-Handbuch
+- Fragen zu offenen Rechnungen, Mahnungen, Zahlungseingang → OPos-Handbuch
+- Fragen zu Anlagen, Abschreibungen → Anbu-Handbuch
+- Fragen zu Kostenstellen, Kostenarten → Kore-Handbuch
+- Niemals OPos-Kontext für FIBU-Auswertungsfragen verwenden
 
 GESPRÄCHSFÜHRUNG — WICHTIG:
 - Bei Prozessfragen (Wie mache ich X?): Erkläre NUR Schritt 1. Frage danach: "Konnten Sie das umsetzen?"
-- Antwortet der User mit "Ja" oder "Erledigt": Fahre mit Schritt 2 fort.
-- Antwortet der User mit "Nein" oder "Nicht geschafft": Erkläre Schritt 1 nochmal anders oder ausführlicher.
+- Antwortet der User mit "Ja" oder "Erledigt": Fahre mit dem nächsten Schritt fort.
+- Antwortet der User mit "Nein" oder "Nicht geschafft": Erkläre den aktuellen Schritt nochmal anders.
 - Antwortet der User mit einer neuen Frage: Beantworte die neue Frage.
-- Beende NIEMALS das Gespräch von dir aus. Frage IMMER am Ende: "Haben Sie noch eine weitere Frage?"
+- Beende NIEMALS das Gespräch von dir aus.
+- Frage IMMER am Ende jeder Antwort: "Haben Sie noch eine weitere Frage?"
 - Verabschiede dich NUR wenn der User explizit sagt: "Nein danke", "Tschüss", "Auf Wiederhören".
 
 WICHTIG:
-- Wenn die Antwort NICHT im Kontext steht: "Dazu habe ich leider keine Information in meinen Unterlagen. Haben Sie noch eine andere Frage?"
-- Niemals erfinden oder raten – nur aus dem Kontext antworten.
+- Wenn die Antwort NICHT im Kontext steht: "Dazu habe ich leider keine Information. Haben Sie noch eine andere Frage?"
+- Niemals erfinden oder raten.
 
 KONTEXT AUS DEN HANDBÜCHERN:
 {context}"""
+
+# Kurze Antworten die keinen neuen RAG-Suchkontext brauchen
+SHORT_RESPONSES = ["ja", "nein", "ok", "okay", "erledigt", "gemacht", "nicht",
+                   "klappt nicht", "funktioniert nicht", "verstanden", "gut"]
 
 
 def _get_access_token() -> str:
@@ -45,6 +60,31 @@ def _get_access_token() -> str:
     auth_req = google.auth.transport.requests.Request()
     credentials.refresh(auth_req)
     return credentials.token
+
+
+def _build_search_query(question: str, history: list) -> str:
+    """
+    Reichert kurze Antworten (Ja/Nein) mit dem letzten Thema aus der History an,
+    damit Vertex AI Search den richtigen Kontext findet.
+    """
+    q_lower = question.lower().strip()
+    is_short = any(q_lower == kw or q_lower.startswith(kw)
+                   for kw in SHORT_RESPONSES) and len(question.split()) <= 4
+
+    if is_short and history:
+        # Letzten Agenten-Turn als Suchbasis nehmen
+        last_assistant = next(
+            (m["content"] for m in reversed(history) if m["role"] == "assistant"),
+            None
+        )
+        if last_assistant:
+            # Ersten Satz der letzten Antwort als Suchkontext verwenden
+            first_sentence = last_assistant.split(".")[0][:150]
+            enriched = f"{first_sentence} {question}"
+            logger.info("Suchanfrage angereichert: '%s'", enriched)
+            return enriched
+
+    return question
 
 
 def _search_datastore(question: str) -> str:
@@ -60,6 +100,7 @@ def _search_datastore(question: str) -> str:
         "pageSize": settings.rag_top_k,
         "contentSearchSpec": {
             "snippetSpec": {"returnSnippet": True},
+            "extractiveContentSpec": {"maxExtractiveAnswerCount": 2},
         },
     }
     headers = {
@@ -74,11 +115,16 @@ def _search_datastore(question: str) -> str:
     passages = []
     for result in data.get("results", []):
         derived = result.get("document", {}).get("derivedStructData", {})
-        for sn in derived.get("snippets", []):
-            if sn.get("snippet"):
-                # HTML-Tags entfernen
-                text = sn["snippet"].replace("<b>", "").replace("</b>", "")
-                passages.append(text)
+        # Extractive answers bevorzugen (präziser)
+        for ea in derived.get("extractive_answers", []):
+            if ea.get("content"):
+                passages.append(ea["content"])
+        # Snippets als Fallback
+        if not passages:
+            for sn in derived.get("snippets", []):
+                if sn.get("snippet"):
+                    text = sn["snippet"].replace("<b>", "").replace("</b>", "")
+                    passages.append(text)
 
     context = "\n\n".join(passages)
     logger.info("Passagen: %d | Kontext: %s", len(passages), context[:300] if context else "LEER")
@@ -89,14 +135,18 @@ async def answer_question(question: str, call_sid: str = "") -> str:
     try:
         logger.info("RAG-Abfrage | CallSid=%s | Frage='%s'", call_sid, question)
 
+        # Gesprächsverlauf laden (vor der Suche — für Query-Anreicherung)
+        history = get_history(call_sid)
+
+        # Suchanfrage anreichern bei kurzen Antworten
+        search_query = _build_search_query(question, history)
+
         # Kontext aus Handbüchern laden
-        context = _search_datastore(question)
+        context = _search_datastore(search_query)
 
         if not context:
-            return "Das steht leider nicht in meinen Unterlagen. Ich verbinde Sie gerne mit einem Kollegen weiter."
-
-        # Gesprächsverlauf laden
-        history = get_history(call_sid)
+            # Kein Kontext — trotzdem mit History antworten lassen
+            context = "Kein spezifischer Kontext gefunden."
 
         # LLM aufrufen
         llm = ChatVertexAI(
