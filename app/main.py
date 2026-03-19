@@ -32,7 +32,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(call_router.router, prefix="/call", tags=["Telephonie"])
+app.include_router(call_router.router, tags=["Telephonie"])
 
 
 @app.get("/health")
