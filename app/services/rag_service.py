@@ -103,7 +103,7 @@ def _search_datastore(question: str) -> str:
     url = (
         f"https://discoveryengine.googleapis.com/v1/projects/"
         f"{settings.gcp_project_id}/locations/global/collections/"
-        f"default_collection/dataStores/{settings.vertex_search_datastore}/servingConfigs/"
+        f"default_collection/engines/handbuecher-engine/servingConfigs/"
         f"default_config:search"
     )
     payload = {
