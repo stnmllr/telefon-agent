@@ -1,15 +1,16 @@
 # ============================================================
 # app/routers/call_router.py
-# Twilio Webhook-Endpunkte:
-#   POST /call/incoming  – neuer Anruf
-#   POST /call/transcribe – Spracheingabe verarbeiten
+# NEUE, KOMPLETT ÜBERARBEITETE VERSION (2026-03)
+# Twilio Webhooks:
+#   POST /call/incoming   – Start eines Anrufs → Begrüßung, STT aktivieren
+#   POST /call/transcribe – Benutzeräußerung → RAG/LLM → Antwort per TTS
 # ============================================================
+
 import logging
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form
 from fastapi.responses import Response
-from app.services.stt_service import transcribe_recording
+
 from app.services.rag_service import answer_question
-from app.services.tts_service import synthesize_speech
 from app.utils.twiml_builder import (
     build_welcome_twiml,
     build_answer_twiml,
@@ -18,46 +19,121 @@ from app.utils.twiml_builder import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/call")
 
-FAREWELL_KEYWORDS = ["nein danke", "tschüss", "auf wiederhören", "beenden", "kein weiteres"]
+FAREWELL_KEYWORDS = [
+    "nein danke",
+    "danke das war’s",
+    "tschuess",
+    "tschüss",
+    "auf wiederhören",
+    "auf wieder hoeren",
+    "beenden",
+    "schluss",
+    "ende",
+]
 
 
+# ============================================================
+# 1) Eingang eines Anrufs
+# ============================================================
 @router.post("/incoming")
-async def incoming_call(request: Request):
-    logger.info("Eingehender Anruf empfangen.")
+async def incoming_call():
+    """
+    Wird von Twilio beim Start eines Anrufs ausgelöst.
+    Erstellt ein TwiML, das sofort Text-to-Speech abspielt und
+    anschließend Speech-to-Text aktiviert.
+    """
+
+    logger.info("[INCOMING] Neuer Anruf gestartet.")
+
     twiml = build_welcome_twiml(
-        message="Willkommen beim syska ProFI Support. Wie kann ich Ihnen helfen?",
+        message=(
+            "Willkommen beim syska ProFI Support. "
+            "Wie kann ich Ihnen helfen?"
+        ),
         transcribe_url="/call/transcribe",
     )
+
     return Response(content=twiml, media_type="application/xml")
 
 
+# ============================================================
+# 2) Twilio Speech-to-Text liefert ein Ergebnis
+# ============================================================
 @router.post("/transcribe")
 async def transcribe(
     SpeechResult: str = Form(default=""),
     Confidence: float = Form(default=0.0),
     CallSid: str = Form(default=""),
 ):
-    logger.info("CallSid=%s | STT='%s' (Confidence=%.2f)", CallSid, SpeechResult, Confidence)
+    """
+    Twilio liefert hier das STT-Ergebnis. Diese Funktion entscheidet:
+      - Wiederholen? (schlechte Confidence)
+      - Verabschiedung?
+      - Normale Anfrage → RAG/LLM antwortet
+    """
 
-    if not SpeechResult or Confidence < 0.4:
-        logger.warning("Schlechte STT-Qualität oder leere Eingabe.")
+    logger.info(
+        "[TRANSCRIBE] CallSid=%s | Text='%s' | Confidence=%.2f",
+        CallSid,
+        SpeechResult,
+        Confidence,
+    )
+
+    # --------------------------------------------------------
+    # A) Qualitätsprüfung STT
+    # --------------------------------------------------------
+    if not SpeechResult or Confidence < 0.40:
+        logger.warning(
+            "[TRANSCRIBE] Schlechte STT-Qualität oder leere Eingabe."
+        )
+
         twiml = build_fallback_twiml(
-            message="Entschuldigung, ich habe Sie nicht verstanden. Bitte wiederholen Sie Ihre Frage.",
+            message="Ich habe Sie leider nicht gut verstanden. "
+                    "Bitte wiederholen Sie Ihre Frage.",
             transcribe_url="/call/transcribe",
         )
         return Response(content=twiml, media_type="application/xml")
 
-    speech_lower = SpeechResult.lower().strip()
-    if any(keyword in speech_lower for keyword in FAREWELL_KEYWORDS):
-        logger.info("CallSid=%s | Abschied erkannt.", CallSid)
+    user_text = SpeechResult.strip().lower()
+
+    # --------------------------------------------------------
+    # B) Verabschiedung erkennen
+    # --------------------------------------------------------
+    if any(keyword in user_text for keyword in FAREWELL_KEYWORDS):
+        logger.info("[TRANSCRIBE] Verabschiedung erkannt. CallSid=%s", CallSid)
+
         twiml = build_farewell_twiml()
         return Response(content=twiml, media_type="application/xml")
 
-    answer = await answer_question(question=SpeechResult, call_sid=CallSid)
+    # --------------------------------------------------------
+    # C) Normale Anfrage → RAG + LLM
+    # --------------------------------------------------------
+    try:
+        answer = await answer_question(
+            question=SpeechResult,
+            call_sid=CallSid,
+        )
+
+    except Exception as exc:
+        logger.exception("[TRANSCRIBE] Fehler in answer_question(): %s", exc)
+
+        twiml = build_fallback_twiml(
+            message=(
+                "Entschuldigung, das hat gerade nicht geklappt. "
+                "Bitte formulieren Sie Ihre Frage noch einmal."
+            ),
+            transcribe_url="/call/transcribe",
+        )
+        return Response(content=twiml, media_type="application/xml")
+
+    # --------------------------------------------------------
+    # D) Antwort als TwiML zurückgeben
+    # --------------------------------------------------------
     twiml = build_answer_twiml(
         answer=answer,
         transcribe_url="/call/transcribe",
     )
+
     return Response(content=twiml, media_type="application/xml")
