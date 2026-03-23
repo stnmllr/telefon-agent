@@ -1,9 +1,6 @@
 # ============================================================
 # app/config.py
-# Alle Konfigurationswerte aus Umgebungsvariablen /
-# GCP Secret Manager (via .env im lokalen Dev)
 # ============================================================
-
 from pydantic_settings import BaseSettings
 
 
@@ -11,12 +8,16 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     # GCP
-    gcp_project_id: str = "my-gcp-project"
-    gcp_location: str = "europe-west3"           # Frankfurt – DSGVO
+    gcp_project_id: str = "boxwood-mantra-489408-c0"   # echtes Projekt als Fallback
+    gcp_location: str = "us-central1"                   # Gemini-Region
 
-    # Vertex AI
-    gemini_model: str = "gemini-1.5-pro-002"
+    # Vertex AI Search — immer global, separate Variable
+    vertex_search_location: str = "global"
+    vertex_search_engine_id: str = "handbuecher-engine"
     vertex_search_datastore: str = "handbuecher-v2"
+
+    # Vertex AI / Gemini
+    gemini_model: str = "gemini-2.0-flash-001"
 
     # Twilio
     twilio_account_sid: str = ""
@@ -32,8 +33,8 @@ class Settings(BaseSettings):
     tts_speaking_rate: float = 1.0
 
     # RAG
-    rag_top_k: int = 5
-    rag_max_tokens: int = 200
+    rag_top_k: int = 3
+    rag_max_tokens: int = 150
     llm_temperature: float = 0.0
 
     class Config:
