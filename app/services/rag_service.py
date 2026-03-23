@@ -74,7 +74,6 @@ def _build_search_query(question: str, history: list) -> str:
                    for kw in SHORT_RESPONSES) and len(question.split()) <= 4
 
     if is_short and history:
-        # Erst letzte Agenten-Antwort versuchen
         last_assistant = next(
             (m["content"] for m in reversed(history) if m["role"] == "assistant"),
             None
@@ -85,7 +84,6 @@ def _build_search_query(question: str, history: list) -> str:
             logger.info("Suchanfrage angereichert (Assistant): '%s'", enriched)
             return enriched
 
-        # Fallback: letzte User-Frage nehmen
         last_user = next(
             (m["content"] for m in reversed(history) if m["role"] == "user"),
             None
@@ -102,9 +100,9 @@ def _search_datastore(question: str) -> str:
     token = _get_access_token()
     url = (
         f"https://discoveryengine.googleapis.com/v1/projects/"
-        f"{settings.gcp_project_id}/locations/global/collections/"
-        f"default_collection/engines/handbuecher-engine/servingConfigs/"
-        f"default_config:search"
+        f"{settings.gcp_project_id}/locations/{settings.vertex_search_location}"
+        f"/collections/default_collection/engines/{settings.vertex_search_engine_id}"
+        f"/servingConfigs/default_config:search"
     )
     payload = {
         "query": question,
@@ -144,22 +142,14 @@ async def answer_question(question: str, call_sid: str = "") -> str:
     try:
         logger.info("RAG-Abfrage | CallSid=%s | Frage='%s'", call_sid, question)
 
-        # Gesprächsverlauf laden
         history = get_history(call_sid)
-
-        # User-Nachricht SOFORT speichern — vor dem LLM-Aufruf
         save_message(call_sid, "user", question)
-
-        # Suchanfrage anreichern bei kurzen Antworten
         search_query = _build_search_query(question, history)
-
-        # Kontext aus Handbüchern laden
         context = _search_datastore(search_query)
 
         if not context:
             context = "Kein spezifischer Kontext gefunden."
 
-        # LLM aufrufen
         llm = ChatVertexAI(
             model_name=settings.gemini_model,
             project=settings.gcp_project_id,
@@ -169,21 +159,17 @@ async def answer_question(question: str, call_sid: str = "") -> str:
         )
 
         messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]
-
         for msg in history:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
                 messages.append(AIMessage(content=msg["content"]))
-
         messages.append(HumanMessage(content=question))
 
         response = await llm.ainvoke(messages)
         answer = response.content.strip()
 
-        # Nur Agenten-Antwort speichern — User wurde bereits oben gespeichert
         save_message(call_sid, "assistant", answer)
-
         logger.info("RAG-Antwort | CallSid=%s | Antwort='%s'", call_sid, answer[:150])
         return answer
 
