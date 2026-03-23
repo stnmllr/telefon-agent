@@ -109,7 +109,6 @@ def _search_datastore(question: str) -> str:
         "pageSize": settings.rag_top_k,
         "contentSearchSpec": {
             "snippetSpec": {"returnSnippet": True},
-            "extractiveContentSpec": {"maxExtractiveAnswerCount": 2},
         },
     }
     headers = {
@@ -124,14 +123,10 @@ def _search_datastore(question: str) -> str:
     passages = []
     for result in data.get("results", []):
         derived = result.get("document", {}).get("derivedStructData", {})
-        for ea in derived.get("extractive_answers", []):
-            if ea.get("content"):
-                passages.append(ea["content"])
-        if not passages:
-            for sn in derived.get("snippets", []):
-                if sn.get("snippet"):
-                    text = sn["snippet"].replace("<b>", "").replace("</b>", "")
-                    passages.append(text)
+        for sn in derived.get("snippets", []):
+            if sn.get("snippet"):
+                text = sn["snippet"].replace("<b>", "").replace("</b>", "")
+                passages.append(text)
 
     context = "\n\n".join(passages)
     logger.info("Passagen: %d | Kontext: %s", len(passages), context[:300] if context else "LEER")
