@@ -109,6 +109,9 @@ def _search_datastore(question: str) -> str:
         "pageSize": settings.rag_top_k,
         "contentSearchSpec": {
             "snippetSpec": {"returnSnippet": True},
+            "extractiveContentSpec": {
+                "maxExtractiveAnswerCount": 2
+            }
         },
     }
     headers = {
