@@ -181,7 +181,8 @@ async def answer_question(question: str, call_sid: str = "") -> str:
             project=settings.gcp_project_id,
             location=settings.gcp_location,
             temperature=settings.llm_temperature,
-            max_output_tokens=settings.rag_max_tokens,
+            max_output_tokens=800,
+            max_retries=1,
         )
 
         messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]
