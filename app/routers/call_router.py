@@ -120,9 +120,17 @@ async def transcribe(
     except Exception as exc:
         logger.exception("[TRANSCRIBE] Firestore-Speichern fehlgeschlagen: %s", exc)
 
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+    is_long_input = len(SpeechResult.split()) > 5
+
+    if is_long_input:
+        twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say language="de-DE" voice="Google.de-DE-Neural2-F">Einen Moment bitte, ich schaue das für Sie nach.</Say>
+  <Redirect method="POST">/call/process</Redirect>
+</Response>"""
+    else:
+        twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
   <Redirect method="POST">/call/process</Redirect>
 </Response>"""
 
