@@ -9,9 +9,10 @@ def build_welcome_twiml(message: str, transcribe_url: str) -> str:
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="3"
+          speechTimeout="10"
           speechModel="phone_call"
-          enhanced="true">
+          enhanced="true"
+          actionOnEmptyResult="true">
     <Say language="de-DE" voice="Google.de-DE-Neural2-F">{message}</Say>
   </Gather>
   <Say language="de-DE" voice="Google.de-DE-Neural2-F">
@@ -27,9 +28,10 @@ def build_answer_twiml(answer: str, transcribe_url: str) -> str:
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="3"
+          speechTimeout="10"
           speechModel="phone_call"
-          enhanced="true">
+          enhanced="true"
+          actionOnEmptyResult="true">
     <Say language="de-DE" voice="Google.de-DE-Neural2-F">{answer}</Say>
   </Gather>
   <Say language="de-DE" voice="Google.de-DE-Neural2-F">
@@ -55,9 +57,10 @@ def build_fallback_twiml(message: str, transcribe_url: str) -> str:
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="3"
+          speechTimeout="10"
           speechModel="phone_call"
-          enhanced="true">
+          enhanced="true"
+          actionOnEmptyResult="true">
     <Say language="de-DE" voice="Google.de-DE-Neural2-F">{message}</Say>
   </Gather>
 </Response>"""
