@@ -184,7 +184,7 @@ async def answer_question(question: str, call_sid: str = "") -> str:
             temperature=settings.llm_temperature,
             max_output_tokens=800,
             max_retries=1,
-            model_kwargs={"thinking": {"type": "disabled"}},
+            model_kwargs={"thinking": {"type": "enabled", "budget_tokens": 512}},
         )
 
         messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]

@@ -9,6 +9,7 @@
 import logging
 from fastapi import APIRouter, Form
 from fastapi.responses import Response
+from google.cloud import firestore
 
 from app.services.rag_service import answer_question
 from app.utils.twiml_builder import (
@@ -17,6 +18,8 @@ from app.utils.twiml_builder import (
     build_fallback_twiml,
     build_farewell_twiml,
 )
+
+db = firestore.Client()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/call")
@@ -108,16 +111,70 @@ async def transcribe(
         return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------
-    # C) Normale Anfrage → RAG + LLM
+    # C) SpeechResult in Firestore zwischenspeichern → Redirect
+    # --------------------------------------------------------
+    try:
+        db.collection("pending").document(CallSid).set({
+            "speech_result": SpeechResult,
+        })
+    except Exception as exc:
+        logger.exception("[TRANSCRIBE] Firestore-Speichern fehlgeschlagen: %s", exc)
+
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">Einen Moment bitte, ich schaue das für Sie nach.</Say>
+  <Redirect method="POST">/call/process</Redirect>
+</Response>"""
+
+    return Response(content=twiml, media_type="application/xml")
+
+
+# ============================================================
+# 3) LLM-Verarbeitung nach Zwischenantwort
+# ============================================================
+@router.post("/process")
+async def process(
+    CallSid: str = Form(default=""),
+):
+    """
+    Liest SpeechResult aus Firestore, ruft RAG/LLM auf und
+    gibt die eigentliche Antwort zurück.
+    """
+
+    logger.info("[PROCESS] CallSid=%s", CallSid)
+
+    # --------------------------------------------------------
+    # A) SpeechResult aus Firestore laden und löschen
+    # --------------------------------------------------------
+    speech_result = ""
+    try:
+        ref = db.collection("pending").document(CallSid)
+        doc = ref.get()
+        if doc.exists:
+            speech_result = doc.to_dict().get("speech_result", "")
+            ref.delete()
+        else:
+            logger.warning("[PROCESS] Kein pending-Eintrag für CallSid=%s", CallSid)
+    except Exception as exc:
+        logger.exception("[PROCESS] Firestore-Lesen fehlgeschlagen: %s", exc)
+
+    if not speech_result:
+        twiml = build_fallback_twiml(
+            message="Entschuldigung, ich konnte Ihre Frage nicht abrufen. Bitte wiederholen Sie.",
+            transcribe_url="/call/transcribe",
+        )
+        return Response(content=twiml, media_type="application/xml")
+
+    # --------------------------------------------------------
+    # B) RAG + LLM
     # --------------------------------------------------------
     try:
         answer = await answer_question(
-            question=SpeechResult,
+            question=speech_result,
             call_sid=CallSid,
         )
-
     except Exception as exc:
-        logger.exception("[TRANSCRIBE] Fehler in answer_question(): %s", exc)
+        logger.exception("[PROCESS] Fehler in answer_question(): %s", exc)
 
         twiml = build_fallback_twiml(
             message=(
@@ -129,7 +186,7 @@ async def transcribe(
         return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------
-    # D) Antwort als TwiML zurückgeben
+    # C) Antwort als TwiML zurückgeben
     # --------------------------------------------------------
     twiml = build_answer_twiml(
         answer=answer,
