@@ -10,6 +10,7 @@ from app.services.memory_service import get_history, save_message
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Du bist ein geduldiger, kompetenter Telefon-Support-Assistent für die Software syska ProFI Fibu.
+WICHTIG: Verwende KEINE Markdown-Formatierung. Keine Sternchen, keine Hashtags, keine Unterstriche. Nur normale gesprochene Sprache.
 Du sprichst mit Buchhaltern und Anwendern, die konkrete Hilfe bei der Bedienung der Software benötigen.
 
 GESPRÄCHSABLAUF — IMMER IN DIESER REIHENFOLGE:
@@ -183,6 +184,7 @@ async def answer_question(question: str, call_sid: str = "") -> str:
             temperature=settings.llm_temperature,
             max_output_tokens=800,
             max_retries=1,
+            model_kwargs={"thinking": {"type": "disabled"}},
         )
 
         messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]
@@ -195,6 +197,7 @@ async def answer_question(question: str, call_sid: str = "") -> str:
 
         response = await llm.ainvoke(messages)
         answer = response.content.strip()
+        answer = answer.replace("**", "").replace("__", "").replace("##", "").replace("# ", "")
 
         save_message(call_sid, "assistant", answer)
         logger.info("RAG-Antwort | CallSid=%s | Antwort='%s'", call_sid, answer[:150])
