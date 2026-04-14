@@ -52,8 +52,9 @@ async def incoming_call():
 
     twiml = build_welcome_twiml(
         message=(
-            "Willkommen beim syska ProFI Support. "
-            "Wie kann ich Ihnen helfen?"
+            "Guten Tag, Sie sind verbunden mit dem SOPRA System Assistenten. "
+            "Ich bin ein KI-Assistent und helfe Ihnen gerne weiter. "
+            "Was kann ich für Sie tun?"
         ),
         transcribe_url="/call/transcribe",
     )
