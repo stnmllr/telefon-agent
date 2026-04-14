@@ -20,7 +20,8 @@ def load_phonebook() -> str:
     with open(_PHONEBOOK_CSV, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
-            parts = [row["Name"], f"Durchwahl {row['Durchwahl']}"]
+            ext_tts = " ".join(row["Durchwahl"])
+            parts = [row["Name"], f"Durchwahl {ext_tts}"]
             if row["Beschreibung"]:
                 parts.append(row["Beschreibung"])
             if row["Email"]:
@@ -36,7 +37,11 @@ SYSTEM_PROMPT = """Du bist ein freundlicher, geduldiger Telefon-Support-Assisten
 INTERNES TELEFONVERZEICHNIS SOPRA SYSTEM:
 {phonebook}
 
-Wenn jemand eine Person sucht oder eine Durchwahl braucht, schlage direkt in diesem Verzeichnis nach und nenne die Durchwahl sofort. Sage NICHT 'Ich schaue nach' — gib die Antwort direkt.
+Wenn jemand eine Person sucht oder eine Durchwahl braucht:
+- Antworte SOFORT ohne RAG-Suche
+- Nenne die Durchwahl direkt: 'Herr Schindler erreichen Sie unter Durchwahl 3 5'
+- Biete NIEMALS an jemanden zu verbinden — das ist technisch nicht möglich
+- Sage nur die Durchwahl und frage ob du noch weiterhelfen kannst
 
 DEINE AUFGABE:
 - Beantworte Fragen AUSSCHLIESSLICH auf Basis der KONTEXT-Dokumente aus den Handbüchern und der Wissensdatenbank.

@@ -25,6 +25,31 @@ def lookup(name: str) -> Optional[dict]:
     return None
 
 
+def find_in_text(text: str) -> Optional[dict]:
+    """Durchsucht den gesamten Text nach einem bekannten Namen aus dem Telefonbuch.
+
+    Nützlich um in einer Freitext-Nutzereingabe einen Telefonbucheintrag zu erkennen.
+
+    Returns:
+        {"name": ..., "durchwahl": ..., "beschreibung": ..., "email": ...} oder None
+    """
+    text_lower = text.lower()
+    with open(_CSV_PATH, encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        for row in reader:
+            # Prüfe Nachname (Teil vor dem Komma) und Vorname einzeln
+            name = row["Name"]
+            parts = [p.strip().lower() for p in name.replace(",", " ").split()]
+            if any(len(p) > 3 and p in text_lower for p in parts):
+                return {
+                    "name": name,
+                    "durchwahl": row["Durchwahl"],
+                    "beschreibung": row["Beschreibung"],
+                    "email": row["Email"],
+                }
+    return None
+
+
 def lookup_by_description(beschreibung: str) -> Optional[dict]:
     """Sucht einen Eintrag im Telefonbuch nach der Beschreibungs-Spalte
     (case-insensitive, Teilstring-Suche).
