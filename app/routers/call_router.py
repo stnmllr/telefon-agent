@@ -63,7 +63,7 @@ async def incoming_call():
     twiml = build_welcome_twiml(
         message=(
             "Guten Tag, Sie sind verbunden mit dem SOPRA System Assistenten. "
-            "Ich bin ein KI-Assistent und helfe Ihnen gerne weiter. "
+            "Ich bin ein Künstliche Intelligenz Assistent und helfe Ihnen gerne weiter. "
             "Was kann ich für Sie tun?"
         ),
         transcribe_url="/call/transcribe",
@@ -194,7 +194,8 @@ async def process(
             ext_tts = " ".join(entry["durchwahl"])
             answer = (
                 f"{entry['name']} erreichen Sie unter Durchwahl {ext_tts}. "
-                f"Kann ich Ihnen noch weiterhelfen?"
+                f"Ich kann leider keine direkte Weiterleitung vornehmen. "
+                f"Kann ich Ihnen sonst noch helfen?"
             )
             logger.info("[PROCESS] Telefonbuch-Shortcut | %s → %s", entry["name"], entry["durchwahl"])
             twiml = build_answer_twiml(answer=answer, transcribe_url="/call/transcribe")
