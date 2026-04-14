@@ -191,7 +191,8 @@ async def process(
     if any(kw in text_lower for kw in PHONEBOOK_KEYWORDS):
         entry = phonebook_service.find_in_text(speech_result)
         if entry:
-            ext_tts = ", ".join(entry["durchwahl"])
+            from app.services.rag_service import digit_to_word
+            ext_tts = " ".join(digit_to_word(d) for d in entry["durchwahl"])
             answer = (
                 f"{entry['name']} erreichen Sie unter Durchwahl {ext_tts}. "
                 f"Ich kann leider keine direkte Weiterleitung vornehmen. "

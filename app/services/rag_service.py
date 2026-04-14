@@ -15,12 +15,22 @@ logger = logging.getLogger(__name__)
 _PHONEBOOK_CSV = os.path.join(os.path.dirname(__file__), "..", "data", "telefonbuch.csv")
 
 
+_DIGIT_WORDS = {
+    "0": "null", "1": "eins", "2": "zwei", "3": "drei", "4": "vier",
+    "5": "fünf", "6": "sechs", "7": "sieben", "8": "acht", "9": "neun",
+}
+
+
+def digit_to_word(digit: str) -> str:
+    return _DIGIT_WORDS.get(digit, digit)
+
+
 def load_phonebook() -> str:
     lines = []
     with open(_PHONEBOOK_CSV, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
-            ext_tts = ", ".join(row["Durchwahl"])
+            ext_tts = " ".join(digit_to_word(d) for d in row["Durchwahl"])
             parts = [row["Name"], f"Durchwahl {ext_tts}"]
             if row["Beschreibung"]:
                 parts.append(row["Beschreibung"])
