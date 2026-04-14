@@ -1,4 +1,6 @@
+import csv
 import logging
+import os
 import google.auth
 import google.auth.transport.requests
 import requests as http_requests
@@ -10,7 +12,31 @@ from app.services import phonebook_service
 
 logger = logging.getLogger(__name__)
 
+_PHONEBOOK_CSV = os.path.join(os.path.dirname(__file__), "..", "data", "telefonbuch.csv")
+
+
+def load_phonebook() -> str:
+    lines = []
+    with open(_PHONEBOOK_CSV, encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        for row in reader:
+            parts = [row["Name"], f"Durchwahl {row['Durchwahl']}"]
+            if row["Beschreibung"]:
+                parts.append(row["Beschreibung"])
+            if row["Email"]:
+                parts.append(row["Email"])
+            lines.append(" | ".join(parts))
+    return "\n".join(lines)
+
+
+PHONEBOOK = load_phonebook()
+
 SYSTEM_PROMPT = """Du bist ein freundlicher, geduldiger Telefon-Support-Assistent für die Software syska ProFI Fibu.
+
+INTERNES TELEFONVERZEICHNIS SOPRA SYSTEM:
+{phonebook}
+
+Wenn jemand eine Person sucht oder eine Durchwahl braucht, schlage direkt in diesem Verzeichnis nach und nenne die Durchwahl sofort. Sage NICHT 'Ich schaue nach' — gib die Antwort direkt.
 
 DEINE AUFGABE:
 - Beantworte Fragen AUSSCHLIESSLICH auf Basis der KONTEXT-Dokumente aus den Handbüchern und der Wissensdatenbank.
@@ -205,7 +231,7 @@ async def answer_question(question: str, call_sid: str = "") -> str:
             max_output_tokens=settings.rag_max_tokens,
         )
 
-        messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context))]
+        messages = [SystemMessage(content=SYSTEM_PROMPT.format(context=context, phonebook=PHONEBOOK))]
         for msg in history:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
