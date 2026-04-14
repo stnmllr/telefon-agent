@@ -1,4 +1,4 @@
-# KI-Telefon-Agent — Projektstand 10.04.2026
+# KI-Telefon-Agent — Projektstand 14.04.2026
 
 ## Infrastruktur
 
@@ -16,10 +16,13 @@
 
 ## Aktueller Status: ✅ AGENT FUNKTIONIERT GUT
 
-- Gemini 2.5 Flash aktiv — Antwortqualität deutlich besser als 2.0
+- Gemini 2.5 Flash aktiv — gute Antwortqualität
+- Neue Begrüßung: "Guten Tag, Sie sind verbunden mit dem SOPRA System Assistenten. Ich bin ein Künstliche Intelligenz Assistent und helfe Ihnen gerne weiter. Was kann ich für Sie tun?"
+- Telefonbuch mit 35 Einträgen inkl. E-Mail-Adressen direkt im System-Prompt
+- Routing-Logik für alle Kategorien (syska, ERP, EVS, HR, IT, Verwaltung, Telefonbuch)
 - Zwischenantwort "Einen Moment bitte..." bei langen Fragen (>5 Wörter)
-- Kein Markdown mehr in Antworten (Sternchen-Problem behoben)
-- Schritt-für-Schritt Gesprächsführung mit Rückfragen aktiv
+- Kein Markdown in Antworten
+- Schritt-für-Schritt Gesprächsführung mit Rückfragen
 - Logisches Schlussfolgern bei fehlenden Handbuch-Infos
 
 ## Aktuelle Konfiguration (Cloud Run Env-Vars)
@@ -39,35 +42,34 @@ RAG_MAX_TOKENS=400
 LLM_TEMPERATURE=0.0
 ```
 
-## Entwicklungsumgebung
+## Projektstruktur
 
-| Tool | Status |
-|---|---|
-| VS Code | ✅ installiert, Projekt geöffnet |
-| Claude Code | ✅ als VS Code Extension aktiv |
-| Node.js v24 | ✅ installiert |
-| Git 2.53 | ✅ installiert |
-| gcloud CLI | ✅ installiert, eingeloggt als stn.mueller@gmail.com |
-| PowerShell ExecutionPolicy | ✅ RemoteSigned gesetzt |
-
-**Workflow:**
-- Planung: claude.ai — PROJEKTSTAND.md zu Beginn hochladen
-- Code ändern: Claude Code in VS Code (Chat-Panel rechts)
-- Deploy: git add -A && git commit -m "..." && git push origin main
-- Terminal: immer Command Prompt verwenden, nicht PowerShell
-- Logs live: gcloud beta run services logs tail telefon-agent --region europe-west3 --project boxwood-mantra-489408-c0
+```
+app/
+├── data/
+│   └── telefonbuch.csv          ← Internes Telefonverzeichnis mit Durchwahlen + E-Mails
+├── routers/
+│   └── call_router.py           ← Twilio Webhooks + Routing-Logik
+├── services/
+│   ├── rag_service.py           ← LLM + RAG + System-Prompt
+│   ├── memory_service.py        ← Firestore Conversation Memory
+│   ├── phonebook_service.py     ← Telefonbuch-Lookup
+│   └── email_service.py         ← (noch zu implementieren)
+└── utils/
+    └── twiml_builder.py         ← TwiML Response Builder
+```
 
 ## Architektur call_router.py
 
 ```
 POST /call/incoming
-→ Begrüßung + STT aktivieren
+→ Begrüßung als SOPRA System KI-Assistent + STT aktivieren
 
 POST /call/transcribe
 → STT-Qualität prüfen
 → Verabschiedung erkennen
 → Bei >5 Wörtern: SpeechResult in Firestore (pending/{CallSid})
-                   + Say "Einen Moment bitte..."
+                   + "Einen Moment bitte..."
                    + Redirect zu /call/process
 → Bei ≤5 Wörtern: direkt Redirect zu /call/process
 
@@ -76,6 +78,25 @@ POST /call/process
 → answer_question() aufrufen (RAG + LLM)
 → Antwort als TwiML zurückgeben
 ```
+
+## Routing-Logik (aktiv im System-Prompt)
+
+| Kategorie | Erkennungsmerkmale | Aktion |
+|---|---|---|
+| syska ProFI | Buchung, Fibu, Periode, Storno, OPos... | RAG-Pipeline |
+| ERP | ERP, Warenwirtschaft, Auftrag, Kulimi... | DW 112 nennen oder E-Mail erp-support@sopra-system.com |
+| EVS | EVS, Zeiterfassung | DW 20 nennen oder E-Mail evs-support@sopra-system.com |
+| HR | HR, Personal, Urlaub, Gehalt... | DW 116 nennen oder E-Mail hr-support@sopra-system.com |
+| IT | Computer, Netzwerk, Drucker, Login... | DW 115 nennen oder E-Mail it-support@sopra-system.com |
+| Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | DW 26 nennen oder E-Mail Stephan.Mueller@sopra-system.com |
+| Telefonbuch | "Ich möchte X sprechen", "Durchwahl von X" | Direkt aus telefonbuch.csv antworten |
+| Persönlich | Jemand möchte Stephan Müller sprechen | DW 26 nennen, keine direkte Weiterleitung möglich |
+| Unklar | Alles andere | Rückfrage stellen |
+
+## Offenes Problem: Durchwahl-Aussprache
+TTS liest Durchwahlen wie "26" als "zweiundzwanzig" oder "zweisechste".
+Bisherige Versuche: Leerzeichen, Komma, Bindestrich, Wörter — alle unzureichend.
+→ Nächste Session: SSML `<say-as interpret-as="telephone">` in Twilio testen
 
 ## Kosten (monatlich, Schätzung)
 
@@ -91,60 +112,61 @@ POST /call/process
 Budget-Alert: €10/Monat eingerichtet ✅
 GCP: Bezahltes Konto, $300 Guthaben läuft noch
 
-## Alle bisherigen Fixes
-
-1. Einrückungsfehler call_router.py — behoben
-2. Placeholder my-gcp-project → echte Projekt-ID
-3. extractiveContentSpec — aktiv (Enterprise Edition)
-4. Modellname → gemini-2.5-flash
-5. IAM — Service Account hat roles/discoveryengine.viewer
-6. Doppelter LLM-Block entfernt
-7. vertex_search_location=global, vertex_search_engine_id=handbuecher-engine
-8. LangChain + Vertex AI Libraries aktualisiert
-9. Markdown aus Antworten entfernt (answer.replace)
-10. Thinking Budget auf 512 Tokens gesetzt
-11. Zwischenantwort via Firestore-Redirect implementiert
-12. Zwischenantwort nur bei >5 Wörtern
-
 ## NÄCHSTE SESSION — Offene Punkte (Reihenfolge)
 
-### 1. Supportfälle-Dokument hochladen ← ZUERST
-Fall 6-8 wurden von Claude Code erstellt aber noch nicht in den GCS Bucket hochgeladen.
+### 1. Durchwahl-Aussprache fixen ← ZUERST
+SSML mit `<say-as interpret-as="telephone">` in Twilio testen:
+```python
+# In twiml_builder.py — Say-Tag mit SSML:
+<Say language="de-DE" voice="Google.de-DE-Neural2-F">
+  <say-as interpret-as="telephone">26</say-as>
+</Say>
+```
+Twilio unterstützt SSML wenn der Text als SSML-String übergeben wird.
+
+### 2. Outlook-Kalender Integration ← WARTET AUF IT-ADMIN
+**Was fehlt:** Admin-Genehmigung für `Calendars.Read` in Microsoft 365
+**Ansprechpartner:** Patrick Münchhoff, DW 82
+**Was er tun muss:** Im Microsoft 365 Admin Center die Graph API Berechtigung
+`Calendars.Read` für eine neue App Registration genehmigen.
+
+**Technischer Plan nach Freigabe:**
+- Neue Azure App Registration: `telefon-agent-kalender`
+- Neues File: `app/services/calendar_service.py`
+- Google Cloud Scheduler: alle 15 Min Kalender prüfen → Status in Firestore schreiben
+- Firestore Dokument: `calendar_status/{user_email}` mit Feldern:
+  `status` (verfügbar/meeting/abwesend), `bis` (Uhrzeit), `naechster_termin`
+- Agent liest Status beim Anruf aus Firestore
+
+**Env-Vars die dann nötig sind:**
+```
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=...
+AZURE_CLIENT_SECRET=...
+OUTLOOK_USER_EMAIL=Stephan.Mueller@sopra-system.com
+```
+
+### 3. E-Mail Service implementieren
+Neues File: `app/services/email_service.py`
+Für alle Routing-Kategorien die E-Mails versenden sollen.
+Empfehlung: SendGrid (einfacher) oder Gmail API (bereits in GCP)
+
+**Neue Env-Vars:**
+```
+SENDGRID_API_KEY=...
+```
+
+### 4. Supportfälle-Dokument hochladen
+Fall 6-8 (Steuerkonto-Differenz, UStVA, Monatsabschluss) wurden erstellt
+aber noch nicht in den GCS Bucket hochgeladen:
 ```cmd
 gsutil cp supportfaelle_syska_profi.txt gs://boxwood-mantra-489408-c0-handbuecher/
 ```
-Danach Datastore neu indexieren: GCP Console → AI Search → handbuecher-engine → Daten → Neu indexieren
+Danach Datastore neu indexieren.
 
-### 2. Latenz weiter reduzieren
-Aktuell ~13 Sekunden für LLM-Aufruf — eingeschränkt durch Gemini 2.5 Flash auf Vertex AI.
-Optionen:
-- RAG_TOP_K auf 3 reduzieren (weniger Kontext = schneller)
-- budget_tokens weiter reduzieren (z.B. 256)
-- Gemini 2.5 Flash Lite testen (schneller, etwas weniger Qualität)
-
-### 3. E-Mail Service implementieren
-Neues File: app/services/email_service.py via SendGrid oder Gmail API.
-Neue Env-Vars in Cloud Run:
-```
-SENDGRID_API_KEY=...
-EMAIL_SUPPORT=support@sopra-system.com
-EMAIL_IT=it-support@sopra-system.com
-EMAIL_MANAGEMENT=stephan.mueller@sopra-system.com
-EMAIL_CC=stephan.mueller@sopra-system.com
-```
-
-### 4. Routing-Logik implementieren
-Wenn Kunde kein syska-Thema hat:
-- EVS → Sprachhinweis
-- HR → Sprachhinweis
-- ERP → E-Mail support@sopra-system.com
-- IT → E-Mail it-support@sopra-system.com
-- Verwaltung/Verträge → E-Mail stephan.mueller@sopra-system.com
-- Agent kann nicht helfen → E-Mail support@sopra-system.com, CC: stephan.mueller@sopra-system.com
-
-### 5. TTS-Stimme weiter optimieren
-Journey-F ist aktiv aber noch nicht optimal.
-Alternativen: de-DE-Chirp3-HD-Aoede
+### 5. Latenz weiter reduzieren
+Aktuell ~13 Sekunden für LLM-Aufruf.
+Optionen: RAG_TOP_K auf 3, budget_tokens auf 256, Gemini 2.5 Flash Lite testen
 
 ### 6. Error Handling & Monitoring
 Cloud Logging Alerts, Health Checks
@@ -155,22 +177,12 @@ FIBU / OPos / Kore / Anbu / Sonstiges
 ### 8. Multi-Agent Modell
 Separater Agent pro Bereich
 
-## Routing-Logik (geplant)
-
-| Szenario | Erkennung | Aktion |
-|---|---|---|
-| syska ProFI Frage | Standard | RAG-Pipeline → Antwort |
-| Agent kann nicht helfen | Kein Kontext | E-Mail → support@sopra-system.com, CC: stephan.mueller@sopra-system.com |
-| EVS | Keyword: "EVS" | Sprachhinweis |
-| HR | Keyword: "HR", "Personal" | Sprachhinweis |
-| ERP | Keyword: "ERP", "Warenwirtschaft" | E-Mail → support@sopra-system.com |
-| IT-Problem | Keyword: "Computer", "Netzwerk", "IT" | E-Mail → it-support@sopra-system.com |
-| Verwaltung/Verträge | Keyword: "Vertrag", "Rechnung", "Preis" | E-Mail → stephan.mueller@sopra-system.com |
-
 ## Wichtige Architektur-Entscheidungen
 
 - Vertex AI Search läuft unter locations/global
 - Gemini läuft unter us-central1
 - Enterprise Edition → Extractive Answers → vollständige Textpassagen
-- Firestore: zwei Verwendungen — Conversation Memory + Pending-Cache für Redirect
+- Firestore: zwei Verwendungen — Conversation Memory + Pending-Cache
+- Telefonbuch direkt im System-Prompt als Text (35 Einträge, klein genug)
+- Keine direkte Weiterleitung möglich — Agent nennt nur Durchwahl
 - PowerShell in VS Code → immer Command Prompt verwenden
