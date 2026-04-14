@@ -18,6 +18,7 @@ from app.utils.twiml_builder import (
     build_answer_twiml,
     build_fallback_twiml,
     build_farewell_twiml,
+    build_phonebook_answer_twiml,
 )
 
 db = firestore.Client()
@@ -191,14 +192,12 @@ async def process(
     if any(kw in text_lower for kw in PHONEBOOK_KEYWORDS):
         entry = phonebook_service.find_in_text(speech_result)
         if entry:
-            ext_tts = " - ".join(entry["durchwahl"])
-            answer = (
-                f"{entry['name']} erreichen Sie unter Durchwahl {ext_tts}. "
-                f"Ich kann leider keine direkte Weiterleitung vornehmen. "
-                f"Kann ich Ihnen sonst noch helfen?"
-            )
             logger.info("[PROCESS] Telefonbuch-Shortcut | %s → %s", entry["name"], entry["durchwahl"])
-            twiml = build_answer_twiml(answer=answer, transcribe_url="/call/transcribe")
+            twiml = build_phonebook_answer_twiml(
+                name=entry["name"],
+                durchwahl=entry["durchwahl"],
+                transcribe_url="/call/transcribe",
+            )
             return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------

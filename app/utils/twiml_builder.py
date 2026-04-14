@@ -2,6 +2,37 @@
 # app/utils/twiml_builder.py
 # ============================================================
 
+
+def format_extension_ssml(durchwahl: str) -> str:
+    digits = " ".join(list(str(durchwahl).replace("-", "").replace(" ", "").replace(".", "")))
+    return f'<say-as interpret-as="characters">{digits}</say-as>'
+
+
+def build_phonebook_answer_twiml(name: str, durchwahl: str, transcribe_url: str) -> str:
+    ext_ssml = format_extension_ssml(durchwahl)
+    text = (
+        f"{name} erreichen Sie unter Durchwahl {ext_ssml}. "
+        f"Ich kann leider keine direkte Weiterleitung vornehmen. "
+        f"Kann ich Ihnen sonst noch helfen?"
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech"
+          action="{transcribe_url}"
+          method="POST"
+          language="de-DE"
+          speechTimeout="10"
+          speechModel="phone_call"
+          enhanced="true"
+          actionOnEmptyResult="true">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{text}</Say>
+  </Gather>
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">
+    Vielen Dank für Ihren Anruf. Auf Wiederhören.
+  </Say>
+</Response>"""
+
+
 def build_welcome_twiml(message: str, transcribe_url: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
