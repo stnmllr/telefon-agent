@@ -30,7 +30,8 @@ def load_phonebook() -> str:
     with open(_PHONEBOOK_CSV, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f, delimiter=";")
         for row in reader:
-            parts = [row["Name"], f"Durchwahl {row['Durchwahl']}"]
+            ext_tts = ", ".join(_DIGIT_WORDS[d] for d in row["Durchwahl"] if d in _DIGIT_WORDS)
+            parts = [row["Name"], f"Durchwahl {ext_tts}"]
             if row["Beschreibung"]:
                 parts.append(row["Beschreibung"])
             if row["Email"]:
