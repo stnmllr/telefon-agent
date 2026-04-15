@@ -53,6 +53,13 @@ def build_welcome_twiml(message: str, transcribe_url: str) -> str:
 
 
 def build_answer_twiml(answer: str, transcribe_url: str) -> str:
+    answer_escaped = (
+        answer
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech"
@@ -63,7 +70,7 @@ def build_answer_twiml(answer: str, transcribe_url: str) -> str:
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{answer}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{answer_escaped}</Say>
   </Gather>
   <Say language="de-DE" voice="Google.de-DE-Neural2-F">
     Vielen Dank für Ihren Anruf. Auf Wiederhören.
