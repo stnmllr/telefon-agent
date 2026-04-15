@@ -155,13 +155,17 @@ async def transcribe(
 @router.post("/process")
 async def process(
     CallSid: str = Form(default=""),
+    SpeechResult: str = Form(default=""),
 ):
     """
     Liest SpeechResult aus Firestore, ruft RAG/LLM auf und
     gibt die eigentliche Antwort zurück.
+    Fallback: Falls kein Firestore-Eintrag existiert, wird ein direkt
+    übergebener SpeechResult-Parameter verwendet (nützlich für Tests).
     """
 
     logger.info("[PROCESS] CallSid=%s", CallSid)
+    logger.info("[PROCESS] SpeechResult-Parameter direkt=%s", repr(SpeechResult))
 
     # --------------------------------------------------------
     # A) SpeechResult aus Firestore laden und löschen
@@ -175,6 +179,9 @@ async def process(
             ref.delete()
         else:
             logger.warning("[PROCESS] Kein pending-Eintrag für CallSid=%s", CallSid)
+            if SpeechResult:
+                logger.info("[PROCESS] Nutze direkt übergebenen SpeechResult-Parameter (Test-Fallback).")
+                speech_result = SpeechResult
     except Exception as exc:
         logger.exception("[PROCESS] Firestore-Lesen fehlgeschlagen: %s", exc)
 

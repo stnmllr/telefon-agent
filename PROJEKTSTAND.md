@@ -89,7 +89,7 @@ POST /call/process
 | HR | HR, Personal, Urlaub, Gehalt... | DW 116 nennen oder E-Mail hr-support@sopra-system.com |
 | IT | Computer, Netzwerk, Drucker, Login... | DW 115 nennen oder E-Mail it-support@sopra-system.com |
 | Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | DW 26 nennen oder E-Mail Stephan.Mueller@sopra-system.com |
-| Telefonbuch | "Ich möchte X sprechen", "Durchwahl von X" | Direkt aus telefonbuch.csv antworten |
+| Telefonbuch | "Ich möchte X sprechen", "Durchwahl von X" | Erst E-Mail anbieten, bei Ablehnung Durchwahl nennen |
 | Persönlich | Jemand möchte Stephan Müller sprechen | DW 26 nennen, keine direkte Weiterleitung möglich |
 | Unklar | Alles andere | Rückfrage stellen |
 
@@ -97,6 +97,11 @@ POST /call/process
 TTS liest Durchwahlen wie "26" als "zweiundzwanzig" oder "zweisechste".
 Bisherige Versuche: Leerzeichen, Komma, Bindestrich, Wörter — alle unzureichend.
 → Nächste Session: SSML `<say-as interpret-as="telephone">` in Twilio testen
+
+## Letzte Änderung heute
+Telefonbuch-Routing überarbeitet: Agent bietet zuerst E-Mail an die gesuchte Person an
+(mit Gesprächszusammenfassung + Kontaktdaten des Anrufers), nennt Durchwahl erst
+wenn Anrufer keine E-Mail möchte.
 
 ## Kosten (monatlich, Schätzung)
 
@@ -186,3 +191,80 @@ Separater Agent pro Bereich
 - Telefonbuch direkt im System-Prompt als Text (35 Einträge, klein genug)
 - Keine direkte Weiterleitung möglich — Agent nennt nur Durchwahl
 - PowerShell in VS Code → immer Command Prompt verwenden
+
+---
+
+## Automatisierte Tests (nächste Session implementieren)
+
+### test_scenarios.bat — alle Szenarien in einem Klick
+
+Datei `test_scenarios.bat` im Repo-Root erstellen mit folgendem Inhalt:
+
+```batch
+@echo off
+set BASE_URL=https://telefon-agent-1051648887841.europe-west3.run.app
+
+echo ========================================
+echo SZENARIO 1: syska ProFI - Buchung erfassen
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Wie erfasse ich eine Buchung?" -d "Confidence=0.9" -d "CallSid=test-s1" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 2: syska ProFI - Steuerkonto Differenz
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich habe eine Differenz zwischen meinem Steuerkonto und der theoretischen Steuer" -d "Confidence=0.9" -d "CallSid=test-s2" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 3: Telefonbuch - Person suchen
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich moechte Herrn Schindler sprechen" -d "Confidence=0.9" -d "CallSid=test-s3" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 4: ERP Support
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich habe ein Problem mit meinem ERP System" -d "Confidence=0.9" -d "CallSid=test-s4" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 5: EVS Support
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich brauche Hilfe mit EVS" -d "Confidence=0.9" -d "CallSid=test-s5" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 6: IT Problem
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Mein Computer startet nicht mehr" -d "Confidence=0.9" -d "CallSid=test-s6" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 7: Verwaltung / Rechnung
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich habe eine Frage zu meiner Rechnung" -d "Confidence=0.9" -d "CallSid=test-s7" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo SZENARIO 8: Verabschiedung
+echo ========================================
+curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Nein danke tschuess" -d "Confidence=0.9" -d "CallSid=test-s8" | findstr /i "Say"
+
+echo.
+echo ========================================
+echo ALLE TESTS ABGESCHLOSSEN
+echo ========================================
+pause
+```
+
+### KI-Testagent (Ebene 2 — später)
+
+Ein Claude-Artefakt das:
+1. Alle curl-Tests automatisch ausführt
+2. Die Antworten inhaltlich bewertet (korrekt? vollständig? Gesprächsführung richtig?)
+3. Einen strukturierten Testbericht erstellt
+4. Verbesserungsvorschläge für den System-Prompt macht
+
+Wird hier im Claude-Chat als interaktives Artefakt implementiert —
+kein separates Deployment nötig.
