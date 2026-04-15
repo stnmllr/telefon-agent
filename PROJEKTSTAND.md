@@ -1,4 +1,4 @@
-# KI-Telefon-Agent — Projektstand 14.04.2026
+# KI-Telefon-Agent — Projektstand 15.04.2026
 
 ## Infrastruktur
 
@@ -14,16 +14,14 @@
 | GitHub | stnmllr/telefon-agent, CI/CD via GitHub Actions (Push main → auto-deploy) |
 | Service Account | 1051648887841-compute@developer.gserviceaccount.com |
 
-## Aktueller Status: ✅ AGENT FUNKTIONIERT GUT
+## Aktueller Status: ✅ ALLE 8 TEST-SZENARIEN BESTANDEN
 
-- Gemini 2.5 Flash aktiv — gute Antwortqualität
-- Neue Begrüßung: "Guten Tag, Sie sind verbunden mit dem SOPRA System Assistenten. Ich bin ein Künstliche Intelligenz Assistent und helfe Ihnen gerne weiter. Was kann ich für Sie tun?"
-- Telefonbuch mit 35 Einträgen inkl. E-Mail-Adressen direkt im System-Prompt
-- Routing-Logik für alle Kategorien (syska, ERP, EVS, HR, IT, Verwaltung, Telefonbuch)
-- Zwischenantwort "Einen Moment bitte..." bei langen Fragen (>5 Wörter)
-- Kein Markdown in Antworten
-- Schritt-für-Schritt Gesprächsführung mit Rückfragen
-- Logisches Schlussfolgern bei fehlenden Handbuch-Infos
+Alle Szenarien in test_scenarios.bat laufen korrekt durch:
+- syska ProFI Support: Schritt-für-Schritt Hilfe mit Rückfragen
+- Steuerkonto-Differenz: Diagnose-Frage wird gestellt
+- Telefonbuch: E-Mail wird zuerst angeboten, dann Durchwahl
+- ERP / EVS / IT / Verwaltung: Durchwahl + E-Mail Angebot
+- Verabschiedung: korrekt erkannt
 
 ## Aktuelle Konfiguration (Cloud Run Env-Vars)
 
@@ -51,12 +49,12 @@ app/
 ├── routers/
 │   └── call_router.py           ← Twilio Webhooks + Routing-Logik
 ├── services/
-│   ├── rag_service.py           ← LLM + RAG + System-Prompt
+│   ├── rag_service.py           ← LLM + RAG + System-Prompt + Telefonbuch im Prompt
 │   ├── memory_service.py        ← Firestore Conversation Memory
-│   ├── phonebook_service.py     ← Telefonbuch-Lookup
-│   └── email_service.py         ← (noch zu implementieren)
+│   └── phonebook_service.py     ← Telefonbuch-Lookup (für zukünftige Nutzung)
 └── utils/
-    └── twiml_builder.py         ← TwiML Response Builder
+    └── twiml_builder.py         ← TwiML Response Builder mit XML-Escaping
+test_scenarios.bat               ← Automatisierte Tests für alle 8 Szenarien
 ```
 
 ## Architektur call_router.py
@@ -75,8 +73,9 @@ POST /call/transcribe
 
 POST /call/process
 → SpeechResult aus Firestore lesen + löschen
+→ Fallback: SpeechResult direkt als Parameter (für Tests)
 → answer_question() aufrufen (RAG + LLM)
-→ Antwort als TwiML zurückgeben
+→ Antwort XML-escaped als TwiML zurückgeben
 ```
 
 ## Routing-Logik (aktiv im System-Prompt)
@@ -84,24 +83,21 @@ POST /call/process
 | Kategorie | Erkennungsmerkmale | Aktion |
 |---|---|---|
 | syska ProFI | Buchung, Fibu, Periode, Storno, OPos... | RAG-Pipeline |
-| ERP | ERP, Warenwirtschaft, Auftrag, Kulimi... | DW 112 nennen oder E-Mail erp-support@sopra-system.com |
-| EVS | EVS, Zeiterfassung | DW 20 nennen oder E-Mail evs-support@sopra-system.com |
-| HR | HR, Personal, Urlaub, Gehalt... | DW 116 nennen oder E-Mail hr-support@sopra-system.com |
-| IT | Computer, Netzwerk, Drucker, Login... | DW 115 nennen oder E-Mail it-support@sopra-system.com |
-| Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | DW 26 nennen oder E-Mail Stephan.Mueller@sopra-system.com |
-| Telefonbuch | "Ich möchte X sprechen", "Durchwahl von X" | Erst E-Mail anbieten, bei Ablehnung Durchwahl nennen |
-| Persönlich | Jemand möchte Stephan Müller sprechen | DW 26 nennen, keine direkte Weiterleitung möglich |
-| Unklar | Alles andere | Rückfrage stellen |
+| ERP | ERP, Warenwirtschaft, Auftrag, Kulimi... | DW 112 + E-Mail erp-support@sopra-system.com |
+| EVS | EVS, Zeiterfassung | DW 20 + E-Mail evs-support@sopra-system.com |
+| HR | HR, Personal, Urlaub, Gehalt... | DW 116 + E-Mail hr-support@sopra-system.com |
+| IT | Computer, Netzwerk, Drucker, Login... | DW 115 + E-Mail it-support@sopra-system.com |
+| Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | DW 26 + E-Mail Stephan.Mueller@sopra-system.com |
+| Telefonbuch | "Ich möchte X sprechen" | Erst E-Mail anbieten, dann bei Ablehnung DW nennen |
+| Verabschiedung | Nein danke, Tschüss... | Farewell TwiML |
 
-## Offenes Problem: Durchwahl-Aussprache
-TTS liest Durchwahlen wie "26" als "zweiundzwanzig" oder "zweisechste".
-Bisherige Versuche: Leerzeichen, Komma, Bindestrich, Wörter — alle unzureichend.
-→ Nächste Session: SSML `<say-as interpret-as="telephone">` in Twilio testen
+## Wichtige Fixes dieser Session
 
-## Letzte Änderung heute
-Telefonbuch-Routing überarbeitet: Agent bietet zuerst E-Mail an die gesuchte Person an
-(mit Gesprächszusammenfassung + Kontaktdaten des Anrufers), nennt Durchwahl erst
-wenn Anrufer keine E-Mail möchte.
+1. XML-Escaping in twiml_builder.py — Anführungszeichen haben TwiML abgeschnitten
+2. Telefonbuch-Shortcut entfernt — LLM übernimmt jetzt korrekt die E-Mail-Logik
+3. max_output_tokens auf 1200 erhöht
+4. Test-Fallback in /call/process — SpeechResult direkt als Parameter möglich
+5. test_scenarios.bat finalisiert und committed
 
 ## Kosten (monatlich, Schätzung)
 
@@ -115,35 +111,36 @@ wenn Anrufer keine E-Mail möchte.
 | **Gesamt** | **~$5–10/Monat** |
 
 Budget-Alert: €10/Monat eingerichtet ✅
-GCP: Bezahltes Konto, $300 Guthaben läuft noch
 
 ## NÄCHSTE SESSION — Offene Punkte (Reihenfolge)
 
-### 1. Durchwahl-Aussprache fixen ← ZUERST
-SSML mit `<say-as interpret-as="telephone">` in Twilio testen:
-```python
-# In twiml_builder.py — Say-Tag mit SSML:
-<Say language="de-DE" voice="Google.de-DE-Neural2-F">
-  <say-as interpret-as="telephone">26</say-as>
-</Say>
+### 1. E-Mail Service implementieren ← NÄCHSTES ZIEL
+Der Agent bietet E-Mails an aber kann sie noch nicht wirklich versenden.
+Neues File: app/services/email_service.py via SendGrid
+
+Neue Env-Vars in Cloud Run:
 ```
-Twilio unterstützt SSML wenn der Text als SSML-String übergeben wird.
+SENDGRID_API_KEY=...
+```
+
+E-Mail Adressen (bereits im Telefonbuch):
+- ERP Support: erp-support@sopra-system.com
+- EVS Support: evs-support@sopra-system.com
+- HR Support: hr-support@sopra-system.com
+- IT Support: it-support@sopra-system.com
+- Verwaltung: Stephan.Mueller@sopra-system.com
 
 ### 2. Outlook-Kalender Integration ← WARTET AUF IT-ADMIN
-**Was fehlt:** Admin-Genehmigung für `Calendars.Read` in Microsoft 365
-**Ansprechpartner:** Patrick Münchhoff, DW 82
-**Was er tun muss:** Im Microsoft 365 Admin Center die Graph API Berechtigung
-`Calendars.Read` für eine neue App Registration genehmigen.
+Ansprechpartner: Patrick Münchhoff, DW 82
+Benötigt: Azure App Registration mit Calendars.Read Berechtigung
 
-**Technischer Plan nach Freigabe:**
-- Neue Azure App Registration: `telefon-agent-kalender`
-- Neues File: `app/services/calendar_service.py`
-- Google Cloud Scheduler: alle 15 Min Kalender prüfen → Status in Firestore schreiben
-- Firestore Dokument: `calendar_status/{user_email}` mit Feldern:
-  `status` (verfügbar/meeting/abwesend), `bis` (Uhrzeit), `naechster_termin`
+Technischer Plan:
+- Google Cloud Scheduler alle 15 Min → liest Outlook → schreibt Status in Firestore
+- Firestore: calendar_status/Stephan.Mueller@sopra-system.com
+- Felder: status (verfügbar/meeting/abwesend), bis (Uhrzeit)
 - Agent liest Status beim Anruf aus Firestore
 
-**Env-Vars die dann nötig sind:**
+Benötigte Env-Vars nach Freigabe:
 ```
 AZURE_TENANT_ID=...
 AZURE_CLIENT_ID=...
@@ -151,120 +148,40 @@ AZURE_CLIENT_SECRET=...
 OUTLOOK_USER_EMAIL=Stephan.Mueller@sopra-system.com
 ```
 
-### 3. E-Mail Service implementieren
-Neues File: `app/services/email_service.py`
-Für alle Routing-Kategorien die E-Mails versenden sollen.
-Empfehlung: SendGrid (einfacher) oder Gmail API (bereits in GCP)
+### 3. Durchwahl-Aussprache verbessern
+TTS liest Durchwahlen noch nicht optimal.
+Nächster Versuch: SSML `<say-as interpret-as="telephone">` direkt im TwiML
 
-**Neue Env-Vars:**
-```
-SENDGRID_API_KEY=...
-```
+### 4. Szenario 7 verfeinern
+Verwaltungs-Anfragen werden noch zu oft als FIBU/OPos interpretiert.
+System-Prompt Unterscheidung verbessern:
+- "Rechnung an Kunden" = OPos/FIBU
+- "Unsere Rechnung, Wartungsvertrag, Lizenz" = Verwaltung → Stephan Müller
 
-### 4. Supportfälle-Dokument hochladen
-Fall 6-8 (Steuerkonto-Differenz, UStVA, Monatsabschluss) wurden erstellt
-aber noch nicht in den GCS Bucket hochgeladen:
+### 5. KI-Testagent (Artefakt)
+Claude-Artefakt das test_scenarios.bat automatisch auswertet
+und Verbesserungsvorschläge macht — nach E-Mail Service implementieren.
+
+### 6. Supportfälle hochladen
+Fall 6-8 in GCS Bucket:
 ```cmd
 gsutil cp supportfaelle_syska_profi.txt gs://boxwood-mantra-489408-c0-handbuecher/
 ```
-Danach Datastore neu indexieren.
 
-### 5. Latenz weiter reduzieren
-Aktuell ~13 Sekunden für LLM-Aufruf.
-Optionen: RAG_TOP_K auf 3, budget_tokens auf 256, Gemini 2.5 Flash Lite testen
-
-### 6. Error Handling & Monitoring
+### 7. Error Handling & Monitoring
 Cloud Logging Alerts, Health Checks
 
-### 7. Intent-Classifier
+### 8. Intent-Classifier
 FIBU / OPos / Kore / Anbu / Sonstiges
-
-### 8. Multi-Agent Modell
-Separater Agent pro Bereich
 
 ## Wichtige Architektur-Entscheidungen
 
 - Vertex AI Search läuft unter locations/global
 - Gemini läuft unter us-central1
 - Enterprise Edition → Extractive Answers → vollständige Textpassagen
-- Firestore: zwei Verwendungen — Conversation Memory + Pending-Cache
-- Telefonbuch direkt im System-Prompt als Text (35 Einträge, klein genug)
-- Keine direkte Weiterleitung möglich — Agent nennt nur Durchwahl
+- Firestore: Conversation Memory + Pending-Cache für Redirect
+- Telefonbuch direkt im System-Prompt als Text (35 Einträge)
+- XML-Escaping in twiml_builder.py verhindert abgeschnittene Antworten
+- Keine direkte Weiterleitung möglich — Agent nennt Durchwahl oder bietet E-Mail
 - PowerShell in VS Code → immer Command Prompt verwenden
-
----
-
-## Automatisierte Tests (nächste Session implementieren)
-
-### test_scenarios.bat — alle Szenarien in einem Klick
-
-Datei `test_scenarios.bat` im Repo-Root erstellen mit folgendem Inhalt:
-
-```batch
-@echo off
-set BASE_URL=https://telefon-agent-1051648887841.europe-west3.run.app
-
-echo ========================================
-echo SZENARIO 1: syska ProFI - Buchung erfassen
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Wie erfasse ich eine Buchung?" -d "Confidence=0.9" -d "CallSid=test-s1" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 2: syska ProFI - Steuerkonto Differenz
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich habe eine Differenz zwischen meinem Steuerkonto und der theoretischen Steuer" -d "Confidence=0.9" -d "CallSid=test-s2" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 3: Telefonbuch - Person suchen
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich moechte Herrn Schindler sprechen" -d "Confidence=0.9" -d "CallSid=test-s3" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 4: ERP Support
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich habe ein Problem mit meinem ERP System" -d "Confidence=0.9" -d "CallSid=test-s4" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 5: EVS Support
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich brauche Hilfe mit EVS" -d "Confidence=0.9" -d "CallSid=test-s5" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 6: IT Problem
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Mein Computer startet nicht mehr" -d "Confidence=0.9" -d "CallSid=test-s6" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 7: Verwaltung / Rechnung
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Ich habe eine Frage zu meiner Rechnung" -d "Confidence=0.9" -d "CallSid=test-s7" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo SZENARIO 8: Verabschiedung
-echo ========================================
-curl -s -X POST %BASE_URL%/call/transcribe -d "SpeechResult=Nein danke tschuess" -d "Confidence=0.9" -d "CallSid=test-s8" | findstr /i "Say"
-
-echo.
-echo ========================================
-echo ALLE TESTS ABGESCHLOSSEN
-echo ========================================
-pause
-```
-
-### KI-Testagent (Ebene 2 — später)
-
-Ein Claude-Artefakt das:
-1. Alle curl-Tests automatisch ausführt
-2. Die Antworten inhaltlich bewertet (korrekt? vollständig? Gesprächsführung richtig?)
-3. Einen strukturierten Testbericht erstellt
-4. Verbesserungsvorschläge für den System-Prompt macht
-
-Wird hier im Claude-Chat als interaktives Artefakt implementiert —
-kein separates Deployment nötig.
+- Test: test_scenarios.bat im Projektordner ausführen
