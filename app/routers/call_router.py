@@ -12,28 +12,17 @@ from fastapi.responses import Response
 from google.cloud import firestore
 
 from app.services.rag_service import answer_question
-from app.services import phonebook_service
 from app.utils.twiml_builder import (
     build_welcome_twiml,
     build_answer_twiml,
     build_fallback_twiml,
     build_farewell_twiml,
-    build_phonebook_answer_twiml,
 )
 
 db = firestore.Client()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/call")
-
-PHONEBOOK_KEYWORDS = [
-    "sprechen",
-    "verbinden",
-    "durchwahl",
-    "erreichen",
-    "durchstellen",
-    "weitergeben",
-]
 
 FAREWELL_KEYWORDS = [
     "nein danke",
@@ -193,22 +182,7 @@ async def process(
         return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------
-    # B) Telefonbuch-Shortcut (ohne LLM)
-    # --------------------------------------------------------
-    text_lower = speech_result.lower()
-    if any(kw in text_lower for kw in PHONEBOOK_KEYWORDS):
-        entry = phonebook_service.find_in_text(speech_result)
-        if entry:
-            logger.info("[PROCESS] Telefonbuch-Shortcut | %s → %s", entry["name"], entry["durchwahl"])
-            twiml = build_phonebook_answer_twiml(
-                name=entry["name"],
-                durchwahl=entry["durchwahl"],
-                transcribe_url="/call/transcribe",
-            )
-            return Response(content=twiml, media_type="application/xml")
-
-    # --------------------------------------------------------
-    # C) RAG + LLM
+    # B) RAG + LLM
     # --------------------------------------------------------
     try:
         answer = await answer_question(

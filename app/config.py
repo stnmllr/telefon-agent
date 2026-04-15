@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # RAG
     rag_top_k: int = 3
-    rag_max_tokens: int = 150
+    rag_max_tokens: int = 1200
     llm_temperature: float = 0.0
 
     class Config:
