@@ -21,7 +21,7 @@ def build_phonebook_answer_twiml(name: str, durchwahl: str, transcribe_url: str)
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="10"
+          speechTimeout="3"
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
@@ -40,7 +40,7 @@ def build_welcome_twiml(message: str, transcribe_url: str) -> str:
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="10"
+          speechTimeout="3"
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
@@ -66,7 +66,7 @@ def build_answer_twiml(answer: str, transcribe_url: str) -> str:
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="10"
+          speechTimeout="3"
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
@@ -95,7 +95,7 @@ def build_fallback_twiml(message: str, transcribe_url: str) -> str:
           action="{transcribe_url}"
           method="POST"
           language="de-DE"
-          speechTimeout="10"
+          speechTimeout="3"
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
