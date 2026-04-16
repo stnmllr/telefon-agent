@@ -7,7 +7,6 @@
 # ============================================================
 
 import logging
-import sys
 from fastapi import APIRouter, Form
 from fastapi.responses import Response
 from google.cloud import firestore
@@ -159,9 +158,6 @@ async def process(
     übergebener SpeechResult-Parameter verwendet (nützlich für Tests).
     """
 
-    print("DEBUG_PROCESS_REACHED", flush=True)
-    sys.stderr.write("DEBUG_STDERR_TEST\n")
-    sys.stderr.flush()
     logger.info("[PROCESS] CallSid=%s", CallSid)
     logger.info("[PROCESS] SpeechResult-Parameter direkt=%s", repr(SpeechResult))
     lat_logger = LatencyLogger(CallSid, flow="process") if settings.latency_logging else None
