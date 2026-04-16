@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     rag_max_tokens: int = 1200
     llm_temperature: float = 0.0
 
+    # Latenz-Logging
+    latency_logging: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

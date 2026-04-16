@@ -242,14 +242,18 @@ def _search_datastore(question: str) -> str:
     return context
 
 
-async def answer_question(question: str, call_sid: str = "") -> str:
+async def answer_question(question: str, call_sid: str = "", lat_logger=None) -> str:
     try:
         logger.info("RAG-Abfrage | CallSid=%s | Frage='%s'", call_sid, question)
 
         history = get_history(call_sid)
         save_message(call_sid, "user", question)
         search_query = _build_search_query(question, history)
+        if lat_logger:
+            lat_logger.mark("rag_start")
         context = _search_datastore(search_query)
+        if lat_logger:
+            lat_logger.mark("rag_done")
 
         if not context:
             context = "Kein spezifischer Kontext gefunden."
@@ -270,7 +274,11 @@ async def answer_question(question: str, call_sid: str = "") -> str:
                 messages.append(AIMessage(content=msg["content"]))
         messages.append(HumanMessage(content=question))
 
+        if lat_logger:
+            lat_logger.mark("llm_start")
         response = await llm.ainvoke(messages)
+        if lat_logger:
+            lat_logger.mark("llm_done")
         answer = response.content.strip()
 
         save_message(call_sid, "assistant", answer)

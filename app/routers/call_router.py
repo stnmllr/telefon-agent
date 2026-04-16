@@ -12,6 +12,8 @@ from fastapi.responses import Response
 from google.cloud import firestore
 
 from app.services.rag_service import answer_question
+from app.config import settings
+from app.utils.latency_logger import LatencyLogger
 from app.utils.twiml_builder import (
     build_welcome_twiml,
     build_answer_twiml,
@@ -84,6 +86,9 @@ async def transcribe(
         SpeechResult,
         Confidence,
     )
+    lat_logger = LatencyLogger(CallSid, flow="transcribe") if settings.latency_logging else None
+    if lat_logger:
+        lat_logger.mark("stt_done")
 
     # --------------------------------------------------------
     # A) Qualitätsprüfung STT
@@ -155,6 +160,9 @@ async def process(
 
     logger.info("[PROCESS] CallSid=%s", CallSid)
     logger.info("[PROCESS] SpeechResult-Parameter direkt=%s", repr(SpeechResult))
+    lat_logger = LatencyLogger(CallSid, flow="process") if settings.latency_logging else None
+    if lat_logger:
+        lat_logger.mark("process_start")
 
     # --------------------------------------------------------
     # A) SpeechResult aus Firestore laden und löschen
@@ -173,6 +181,8 @@ async def process(
                 speech_result = SpeechResult
     except Exception as exc:
         logger.exception("[PROCESS] Firestore-Lesen fehlgeschlagen: %s", exc)
+    if lat_logger:
+        lat_logger.mark("firestore_read")
 
     if not speech_result:
         twiml = build_fallback_twiml(
@@ -188,6 +198,7 @@ async def process(
         answer = await answer_question(
             question=speech_result,
             call_sid=CallSid,
+            lat_logger=lat_logger,
         )
     except Exception as exc:
         logger.exception("[PROCESS] Fehler in answer_question(): %s", exc)
@@ -208,5 +219,9 @@ async def process(
         answer=answer,
         transcribe_url="/call/transcribe",
     )
+
+    if lat_logger:
+        lat_logger.mark("tts_ready")
+        lat_logger.finish()
 
     return Response(content=twiml, media_type="application/xml")
