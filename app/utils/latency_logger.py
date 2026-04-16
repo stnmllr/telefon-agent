@@ -15,20 +15,21 @@ Verwendung:
     logger.finish()   # schreibt Summary-Log mit allen Deltas
 """
 
+import sys
 import time
 import logging
 import json
 from typing import Optional
 
 # Cloud Logging strukturiertes JSON-Format:
-# Wenn auf Cloud Run, interpretiert Google Cloud Logging
-# print()-Ausgaben als structured logs wenn sie valid JSON sind.
+# stderr wird von Cloud Run zuverlässiger als structured log indexiert als stdout.
 _cloud_logger = logging.getLogger("latency")
 _cloud_logger.setLevel(logging.INFO)
+_cloud_logger.propagate = False
 
 # Nur einen Handler hinzufügen (verhindert Doppel-Logs beim Reload)
 if not _cloud_logger.handlers:
-    handler = logging.StreamHandler()
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(message)s"))
     _cloud_logger.addHandler(handler)
 
@@ -110,5 +111,5 @@ class LatencyLogger:
 
     @staticmethod
     def _emit(payload: dict):
-        """JSON-Log ausgeben — Cloud Run leitet stdout an Cloud Logging weiter."""
-        print(json.dumps(payload, ensure_ascii=False), flush=True)
+        """JSON-Log ausgeben — Cloud Run indexiert stderr als structured log."""
+        _cloud_logger.info(json.dumps(payload, ensure_ascii=False))
