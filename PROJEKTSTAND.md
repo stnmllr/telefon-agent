@@ -167,7 +167,7 @@ VERTEX_SEARCH_DATASTORE_ERP=handbuecher-erp
 
 **Umsetzungsschritte:**
 1. Datastore + Engine in GCP Console anlegen (global, Enterprise)
-2. ERP-Doku in GCS hochladen + indexieren
+2. ERP-Doku in GCS hochladen + indexieren (siehe unten)
 3. Env-Vars in Cloud Run setzen
 4. rag_service.py: `_detect_datastore()` Funktion + dual-query bei "both"
 5. System-Prompt um FIBU↔ERP Integrationskontext erweitern
@@ -175,6 +175,42 @@ VERTEX_SEARCH_DATASTORE_ERP=handbuecher-erp
 
 **Hintergrund:** FIBU ist an ERP angebunden — Ausgangsrechnungen aus ERP
 erzeugen automatisch OPos in der FIBU. Agent muss beide Kontexte kennen.
+
+**Doku-Quelle:** Netzlaufwerk M:\doku (2,39 GB / 3.402 Dateien / 633 Ordner)
+
+**GCS Zielstruktur:**
+```
+gs://boxwood-mantra-489408-c0-handbuecher/
+  fibu/                    ← syska ProFI (heute: handbuecher-v2)
+  erp/eevolution/          ← ERP Kerndoku
+  erp/auftrag/
+  erp/artikel/
+  erp/einkauf/
+  erp/kulimi/
+  erp/chargen/
+  erp/schnittstellen/      ← FIBU↔ERP Integration (besonders wichtig)
+  erp/inventur/
+  erp/preiskon/
+```
+
+**Upload-Befehle (Top-Priorität zuerst):**
+```cmd
+gsutil -m cp -r "M:\doku\eevolution\*"      gs://boxwood-mantra-489408-c0-handbuecher/erp/eevolution/
+gsutil -m cp -r "M:\doku\auftrag\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/auftrag/
+gsutil -m cp -r "M:\doku\artikel\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/artikel/
+gsutil -m cp -r "M:\doku\schnittstellen\*"  gs://boxwood-mantra-489408-c0-handbuecher/erp/schnittstellen/
+gsutil -m cp -r "M:\doku\ProFi\*"           gs://boxwood-mantra-489408-c0-handbuecher/fibu/
+gsutil -m cp -r "M:\doku\einkauf\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/einkauf/
+gsutil -m cp -r "M:\doku\kulimi\*"          gs://boxwood-mantra-489408-c0-handbuecher/erp/kulimi/
+gsutil -m cp -r "M:\doku\chargen\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/chargen/
+gsutil -m cp -r "M:\doku\inventur\*"        gs://boxwood-mantra-489408-c0-handbuecher/erp/inventur/
+gsutil -m cp -r "M:\doku\preiskon\*"        gs://boxwood-mantra-489408-c0-handbuecher/erp/preiskon/
+```
+
+**Nicht hochladen:** auswahlprozess neue fibu, AT_Mandant_Sopra, aton, citrix,
+barcode, patlite, waagen, excel, grafik, xml, sql, sql-server2005,
+projektplan .net umstellung, eevolutiondms, *.msg, *.lnk,
+"kunden bestellungen details.xlsx" (Kundendaten — niemals hochladen!)
 
 ### 4. E-Mail Service implementieren ← NÄCHSTES HAUPTZIEL
 Neues File: `app/services/email_service.py` via SendGrid
