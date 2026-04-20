@@ -53,6 +53,21 @@ echo ========================================
 curl -s -X POST %BASE_URL%/call/process_contact -d "SpeechResult=Meine Nummer ist 089 12345 und meine Email ist einmueller at test punkt de" -d "CallSid=test-s9"
 echo.
 echo ========================================
+echo SZENARIO 10a: IT-Problem - Anliegen-Abfrage (Schritt 1)
+echo ========================================
+curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Mein Computer startet nicht mehr" -d "Confidence=0.9" -d "CallSid=test-s10" -d "From=%%2B4989999999"
+echo.
+echo ========================================
+echo SZENARIO 10b: Anliegen schildern (Schritt 2)
+echo ========================================
+curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Ich kann mich nicht mehr einloggen, der Bildschirm bleibt schwarz nach dem Start" -d "Confidence=0.9" -d "CallSid=test-s10"
+echo.
+echo ========================================
+echo SZENARIO 10c: Ablehnung Kontaktdaten - Durchwahl wird genannt (Schritt 3b)
+echo ========================================
+curl -s -X POST %BASE_URL%/call/process_contact -d "SpeechResult=Nein danke ich ruf lieber selbst an" -d "CallSid=test-s10"
+echo.
+echo ========================================
 echo ALLE TESTS ABGESCHLOSSEN
 echo ========================================
 pause

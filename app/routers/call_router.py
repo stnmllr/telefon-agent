@@ -15,6 +15,8 @@ from app.services.rag_service import answer_question, extract_contact_data
 from app.services.memory_service import (
     get_history,
     save_pending_contact,
+    get_pending_contact,
+    update_pending_contact,
     get_and_delete_pending_contact,
 )
 from app.services.email_service import send_routing_email
@@ -57,12 +59,55 @@ def _detect_routing_category(text: str) -> str | None:
     return None
 
 
-def _build_contact_request_twiml() -> str:
+_CATEGORY_LABELS = {
+    "erp":        "ERP-Themen",
+    "evs":        "Zeiterfassung",
+    "hr":         "Personal-Themen",
+    "it":         "IT-Support",
+    "verwaltung": "Verwaltungsthemen",
+}
+
+_CATEGORY_EXTENSIONS = {
+    "erp":        ("ERP-Support",  "eins eins zwei"),
+    "evs":        ("EVS-Support",  "zwei null"),
+    "hr":         ("HR-Support",   "eins eins sechs"),
+    "it":         ("IT-Support",   "eins eins fünf"),
+    "verwaltung": ("Verwaltung",   "zwei sechs"),
+}
+
+_REFUSAL_KEYWORDS = {
+    "nein", "nö", "nicht nötig", "lieber nicht",
+    "ich ruf selbst", "kein bedarf", "nein danke", "danke nein",
+}
+
+
+def _is_refusal(text: str) -> bool:
+    lower = text.strip().lower()
+    return any(kw in lower for kw in _REFUSAL_KEYWORDS)
+
+
+def _build_anliegen_request_twiml(category: str) -> str:
+    label = _CATEGORY_LABELS.get(category, "Ihr Anliegen")
+    msg = (
+        f"Ich verstehe, es geht um {label}. "
+        "Können Sie mir Ihr Anliegen kurz schildern, damit ich es weiterleiten kann?"
+    )
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="/call/transcribe" method="POST"
+          language="de-DE" speechTimeout="7">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+  </Gather>
+  <Redirect method="POST">/call/transcribe</Redirect>
+</Response>"""
+
+
+def _build_contact_offer_twiml() -> str:
     return """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech" action="/call/process_contact" method="POST"
-          language="de-DE" speechTimeout="5">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Gerne leite ich Ihre Anfrage weiter. Darf ich kurz Ihre Rückruf-Nummer und E-Mail-Adresse notieren?</Say>
+          language="de-DE" speechTimeout="7">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Darf ich Ihre Rückruf-Nummer und E-Mail-Adresse notieren, damit wir uns bei Ihnen melden?</Say>
   </Gather>
   <Redirect method="POST">/call/process_contact</Redirect>
 </Response>"""
@@ -230,19 +275,34 @@ async def process(
         return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------
-    # B) Routing-Prüfung VOR RAG/LLM
+    # B) Routing-Flow (stage-basiert, vor RAG/LLM)
     # --------------------------------------------------------
+    pending = get_pending_contact(CallSid)
+
+    if pending and pending.get("stage") == "anliegen":
+        # Schritt 2: Anliegen erhalten → Kontaktdaten anbieten
+        logger.info("[PROCESS] Stage=anliegen, speichere Anliegen und biete Kontaktdaten an. CallSid=%s", CallSid)
+        try:
+            update_pending_contact(CallSid, anliegen=speech_result, stage="kontakt")
+        except Exception as exc:
+            logger.warning("[PROCESS] update_pending_contact fehlgeschlagen: %s", exc)
+        if lat_logger:
+            lat_logger.mark("routing_stage2")
+            lat_logger.finish()
+        return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
+
+    # Schritt 1: Neue Kategorie erkennen
     category = _detect_routing_category(speech_result)
     if category:
-        logger.info("[PROCESS] Kategorie erkannt: %s — überspringe RAG, frage Kontaktdaten ab", category)
+        logger.info("[PROCESS] Kategorie erkannt: %s — frage Anliegen ab. CallSid=%s", category, CallSid)
         try:
-            save_pending_contact(CallSid, category, speech_result, from_number)
+            save_pending_contact(CallSid, category, speech_result, from_number, stage="anliegen")
         except Exception as exc:
             logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
         if lat_logger:
-            lat_logger.mark("routing_match")
+            lat_logger.mark("routing_stage1")
             lat_logger.finish()
-        return Response(content=_build_contact_request_twiml(), media_type="application/xml")
+        return Response(content=_build_anliegen_request_twiml(category), media_type="application/xml")
 
     logger.info("[PROCESS] Kein Routing-Match, gehe zu RAG")
 
@@ -302,25 +362,43 @@ async def process_contact(
         )
         return Response(content=twiml, media_type="application/xml")
 
-    # B) Kontaktdaten per Gemini extrahieren
+    category = pending["category"]
+
+    # B) Ablehnung erkennen → Durchwahl nennen (Schritt 3b)
+    if _is_refusal(SpeechResult):
+        logger.info("[PROCESS_CONTACT] Ablehnung erkannt, nenne Durchwahl. CallSid=%s", CallSid)
+        team_name, ext_words = _CATEGORY_EXTENSIONS.get(category, ("dem Support-Team", ""))
+        if ext_words:
+            msg = f"Kein Problem. Sie erreichen {team_name} direkt unter Durchwahl {ext_words}. Auf Wiederhören."
+        else:
+            msg = f"Kein Problem. Bitte wenden Sie sich direkt an {team_name}. Auf Wiederhören."
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+  <Hangup/>
+</Response>"""
+        return Response(content=twiml, media_type="application/xml")
+
+    # C) Kontaktdaten per Gemini extrahieren (Schritt 3a)
     caller_contact = await extract_contact_data(SpeechResult)
     logger.info("[PROCESS_CONTACT] Extrahiert: %s", caller_contact)
 
-    # C) E-Mail senden
+    # D) E-Mail senden — Anliegen aus pending, Kontaktdaten aus Gemini-Extraktion
+    anliegen = pending.get("anliegen") or pending.get("speech_result", "")
     history = get_history(CallSid)
     await send_routing_email(
-        category=pending["category"],
+        category=category,
         caller_number=pending.get("from_number") or "Unbekannt",
-        user_question=pending["speech_result"],
+        user_question=anliegen,
         conversation_history=history,
         call_sid=CallSid,
         caller_contact=caller_contact,
     )
 
-    # D) Verabschiedung
+    # E) Bestätigung + Verabschiedung
     twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Ich habe Ihre Anfrage weitergeleitet. Sie werden sich in Kürze bei Ihnen melden. Auf Wiederhören.</Say>
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Ihre Anfrage wurde weitergeleitet. Sie werden sich in Kürze bei Ihnen melden. Auf Wiederhören.</Say>
   <Hangup/>
 </Response>"""
     return Response(content=twiml, media_type="application/xml")

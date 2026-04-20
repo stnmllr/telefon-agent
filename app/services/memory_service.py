@@ -61,17 +61,39 @@ def save_pending_contact(
     category: str,
     speech_result: str,
     from_number: str,
+    stage: str = "anliegen",
+    anliegen: str = "",
 ) -> None:
-    """Speichert Routing-Kontext bevor Kontaktdaten erfragt werden."""
+    """Speichert Routing-Kontext. stage: 'anliegen' → wartet auf Anliegen-Beschreibung, 'kontakt' → wartet auf Kontaktdaten."""
     try:
         db.collection("pending_contact").document(call_sid).set({
             "category": category,
             "speech_result": speech_result,
             "from_number": from_number,
+            "stage": stage,
+            "anliegen": anliegen,
             "timestamp": datetime.utcnow().isoformat(),
         })
     except Exception as e:
         logger.error("pending_contact speichern fehlgeschlagen: %s", e)
+
+
+def get_pending_contact(call_sid: str) -> dict | None:
+    """Liest pending_contact/{call_sid} ohne zu löschen."""
+    try:
+        doc = db.collection("pending_contact").document(call_sid).get()
+        return doc.to_dict() if doc.exists else None
+    except Exception as e:
+        logger.error("pending_contact lesen fehlgeschlagen: %s", e)
+        return None
+
+
+def update_pending_contact(call_sid: str, **fields) -> None:
+    """Aktualisiert einzelne Felder in pending_contact/{call_sid}."""
+    try:
+        db.collection("pending_contact").document(call_sid).update(fields)
+    except Exception as e:
+        logger.error("pending_contact aktualisieren fehlgeschlagen: %s", e)
 
 
 def get_and_delete_pending_contact(call_sid: str) -> dict | None:
