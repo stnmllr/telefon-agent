@@ -1,4 +1,4 @@
-# KI-Telefon-Agent — Projektstand 16.04.2026
+# KI-Telefon-Agent — Projektstand 20.04.2026
 
 ## Infrastruktur
 
@@ -9,12 +9,11 @@
 | URL | https://telefon-agent-1051648887841.europe-west3.run.app |
 | Bucket | gs://boxwood-mantra-489408-c0-handbuecher/ |
 | Vertex AI Search | handbuecher-engine (Enterprise Edition ✅), Datastore: handbuecher-v2, Location: global |
-| Firestore | Conversation Memory + Pending-Cache für Redirect aktiv |
+| Firestore | Conversation Memory + Pending-Cache + pending_contact (neu) |
 | Twilio | +49 89 41432469, Webhook auf /call/incoming |
 | GitHub | stnmllr/telefon-agent, CI/CD via GitHub Actions (Push main → auto-deploy) |
 | Service Account | 1051648887841-compute@developer.gserviceaccount.com |
-
-## Status: ✅ ALLE 8 TEST-SZENARIEN BESTANDEN
+| SendGrid | Free Plan (100 Mails/Tag), API Key gesetzt, Sender: stn.mueller@gmail.com (verifiziert) |
 
 ## Aktuelle Konfiguration (Cloud Run Env-Vars)
 
@@ -26,12 +25,15 @@ GEMINI_MODEL=gemini-2.5-flash
 VERTEX_SEARCH_DATASTORE=handbuecher-v2
 STT_LANGUAGE=de-DE
 STT_MODEL=chirp
-TTS_VOICE=de-DE-Journey-F
+TTS_VOICE=de-DE-Neural2-F
 TTS_SPEAKING_RATE=1.0
 RAG_TOP_K=5
 RAG_MAX_TOKENS=400
 LLM_TEMPERATURE=0.0
-LATENCY_LOGGING=true        ← temporär, nach Tests auf false setzen
+LATENCY_LOGGING=false
+SENDGRID_API_KEY=SG.xxx... (gesetzt)
+EMAIL_FROM=stn.mueller@gmail.com     ← temporär, bis DNS für ki-agent@sopra-system.com gesetzt
+EMAIL_FROM_NAME=Sofia – Assistent Stephan Müller
 ```
 
 ## Projektstruktur
@@ -39,38 +41,42 @@ LATENCY_LOGGING=true        ← temporär, nach Tests auf false setzen
 ```
 app/
 ├── data/
-│   └── telefonbuch.csv          ← Internes Telefonverzeichnis
+│   └── telefonbuch.csv
 ├── routers/
-│   └── call_router.py           ← Twilio Webhooks + Routing-Logik
+│   └── call_router.py           ← Twilio Webhooks + Routing-Logik + /call/process_contact (neu)
 ├── services/
-│   ├── rag_service.py           ← LLM + RAG + System-Prompt
-│   ├── memory_service.py        ← Firestore Conversation Memory
-│   └── phonebook_service.py     ← Telefonbuch-Lookup
+│   ├── rag_service.py           ← LLM + RAG + extract_contact_data() + summarize_conversation()
+│   ├── memory_service.py        ← Firestore: Conversation Memory + save/get_pending_contact()
+│   ├── email_service.py         ← SendGrid E-Mail Service (neu)
+│   └── phonebook_service.py
 └── utils/
-    ├── twiml_builder.py         ← TwiML Response Builder mit XML-Escaping
-    └── latency_logger.py        ← Latenz-Messung (neu)
-test_scenarios.bat               ← Automatisierte Tests für alle 8 Szenarien
+    ├── twiml_builder.py
+    └── latency_logger.py
+test_scenarios.bat               ← 10 Szenarien (inkl. 9a/9b, 10a/10b/10c)
 ```
 
 ## Architektur call_router.py
 
 ```
 POST /call/incoming
-→ Begrüßung als SOPRA System KI-Assistent + STT aktivieren
+→ Begrüßung: "Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller."
+→ STT aktivieren
 
 POST /call/transcribe
 → STT-Qualität prüfen
 → Verabschiedung erkennen
-→ Bei >5 Wörtern: SpeechResult in Firestore (pending/{CallSid})
-                   + "Einen Moment bitte..."
-                   + Redirect zu /call/process
-→ Bei ≤5 Wörtern: direkt Redirect zu /call/process
+→ Redirect zu /call/process
 
 POST /call/process
-→ SpeechResult aus Firestore lesen + löschen
-→ Fallback: SpeechResult direkt als Parameter (für Tests)
-→ answer_question() aufrufen (RAG + LLM)
-→ Antwort XML-escaped als TwiML zurückgeben
+→ [NEU] Zuerst: pending_contact Stage prüfen (noch buggy — siehe offene Punkte)
+→ Routing-Kategorie erkennen (ERP/EVS/HR/IT/Verwaltung)
+→ Bei Kategorie-Match: Anliegen abfragen → save_pending_contact(stage="anliegen")
+→ Kein Match: RAG-Pipeline (syska ProFI FIBU)
+
+POST /call/process_contact  ← NEU
+→ SpeechResult lesen
+→ Bei stage="kontakt": Kontaktdaten per Gemini extrahieren → E-Mail senden → Abschluss
+→ Bei Ablehnung: Durchwahl nennen → Hangup
 ```
 
 ## Routing-Logik
@@ -78,48 +84,50 @@ POST /call/process
 | Kategorie | Erkennungsmerkmale | Aktion |
 |---|---|---|
 | syska ProFI | Buchung, Fibu, Periode, Storno, OPos... | RAG-Pipeline |
-| ERP | ERP, Warenwirtschaft, Auftrag, Kulimi... | DW 112 + erp-support@sopra-system.com |
-| EVS | EVS, Zeiterfassung | DW 20 + evs-support@sopra-system.com |
-| HR | HR, Personal, Urlaub, Gehalt... | DW 116 + hr-support@sopra-system.com |
-| IT | Computer, Netzwerk, Drucker, Login... | DW 115 + it-support@sopra-system.com |
-| Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | DW 26 + Stephan.Mueller@sopra-system.com |
+| ERP | ERP, Warenwirtschaft, Auftrag, Kulimi... | Anliegen → Kontakt → E-Mail an erp-support@sopra-system.com / DW 112 |
+| EVS | EVS, Zeiterfassung | Anliegen → Kontakt → E-Mail an evs-support@sopra-system.com / DW 20 |
+| HR | HR, Personal, Urlaub, Gehalt... | Anliegen → Kontakt → E-Mail an hr-support@sopra-system.com / DW 116 |
+| IT | Computer, Netzwerk, Drucker, Login... | Anliegen → Kontakt → E-Mail an it-support@sopra-system.com / DW 115 |
+| Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | Anliegen → Kontakt → E-Mail an Stephan.Mueller@sopra-system.com / DW 26 |
 | Telefonbuch | "Ich möchte X sprechen" | Erst E-Mail anbieten, dann bei Ablehnung DW |
 | Verabschiedung | Nein danke, Tschüss... | Farewell TwiML |
 
-## Latenz-Analyse — Ergebnisse (16.04.2026)
+## E-Mail Service (SendGrid)
 
-### Messmethode
-Strukturiertes Cloud Logging via `latency_logger.py` (LATENCY_LOGGING=true).
-Gemessen: alle Segmente innerhalb `/call/process`.
+| Feld | Wert |
+|---|---|
+| Absender | stn.mueller@gmail.com (temporär) → ki-agent@sopra-system.com (nach DNS) |
+| Absendername | Sofia – Assistent Stephan Müller |
+| Inhalt | Anrufer-Nr, Rückruf-Tel, E-Mail, Zeitpunkt, Kategorie, Anliegen, Gesprächszusammenfassung |
+| Format | Plain Text + HTML |
 
-### Messwerte
+## E-Mail Empfänger
 
-| Segment | Gemessen | Bewertung |
-|---|---|---|
-| firestore_read | 38–108 ms | ✅ Unkritisch |
-| rag_start (Overhead) | 33–136 ms | ✅ Unkritisch |
-| Vertex AI Search (rag_done) | 422–574 ms | ✅ Gut |
-| Gemini 2.5 Flash (llm_done) | 1024–1232 ms | ✅ Gut |
-| tts_ready | 58–87 ms | ✅ Unkritisch |
-| **Gesamt /call/process** | **1614–2138 ms** | ✅ Backend schnell |
+| Kategorie | Empfänger |
+|---|---|
+| ERP | erp-support@sopra-system.com |
+| EVS | evs-support@sopra-system.com |
+| HR | hr-support@sopra-system.com |
+| IT | it-support@sopra-system.com |
+| Verwaltung | Stephan.Mueller@sopra-system.com |
 
-### Fazit
-Das Backend ist **nicht** der Flaschenhals. Die ~15 Sekunden beim echten Anruf
-entstehen primär durch Twilio:
+## Firestore Collections
 
-| Quelle | Geschätzte Zeit | Optimierbar |
-|---|---|---|
-| Twilio STT (Chirp) | ~5–8 s | Bedingt |
-| speechTimeout (Stille-Erkennung) | bis 10 s | ✅ → auf 3 s reduziert |
-| TTS Journey-F Generierung | ~1–2 s | Bedingt |
-| Backend (RAG + LLM) | ~2 s | Bereits optimiert |
+| Collection | Zweck |
+|---|---|
+| conversations/{CallSid} | Gesprächsverlauf (Memory) |
+| pending/{CallSid} | SpeechResult Zwischenspeicher für Redirect |
+| pending_contact/{CallSid} | Routing-Stage + Anliegen + from_number |
 
-## Fixes dieser Session (16.04.2026)
-
-1. **latency_logger.py** implementiert in `app/utils/` — ein/ausschaltbar per `LATENCY_LOGGING` ENV-Var
-2. **Logging auf stderr** umgestellt (`_cloud_logger.info` statt `print`)
-3. **speechTimeout** von 10s auf 3s reduziert → erwartete Latenz ~7–8s statt 15s
-4. Debug-Logs (`DEBUG_PROCESS_REACHED`) temporär eingebaut — **vor nächstem Release entfernen**
+### pending_contact Dokument-Felder
+```
+category:    "erp" | "evs" | "hr" | "it" | "verwaltung"
+stage:       "anliegen" | "kontakt"
+speech_result: originale Frage des Anrufers
+anliegen:    geschildertes Problem (wird in Stage "anliegen" ergänzt)
+from_number: Twilio From-Nummer
+timestamp:   Erstellungszeitpunkt
+```
 
 ## Kosten (monatlich, Schätzung)
 
@@ -130,145 +138,76 @@ entstehen primär durch Twilio:
 | Cloud Run | ~$0 |
 | Firestore | ~$0 |
 | Twilio Nummer + Anrufe | ~$1.50 |
+| SendGrid | ~$0 (Free Plan) |
 | **Gesamt** | **~$5–10/Monat** |
 
 Budget-Alert: €10/Monat eingerichtet ✅
 
 ## NÄCHSTE SESSION — Offene Punkte (Reihenfolge)
 
-### 1. Nachbereitung Latenz-Analyse ← SOFORT
-- Echten Testanruf machen: gefühlte Latenz mit speechTimeout=3s prüfen
-- Falls Anrufer abgeschnitten wird: auf 4–5s anpassen
-- `LATENCY_LOGGING=false` setzen nach Abschluss
-- Debug-Logs (`DEBUG_PROCESS_REACHED`) aus `call_router.py` entfernen
+### 1. Bug: Stage-Prüfung in /call/process ← SOFORT
+**Problem:** Nach "Ja, ich möchte das Problem schildern" landet der zweite
+`/call/process` Aufruf in der normalen Pipeline statt den pending_contact-Stage zu lesen.
 
-### 2. Weitere Latenz-Optimierungen (optional)
-- TTS Voice: `de-DE-Neural2-F` statt `Journey-F` → ~0.5s schneller
-- Firestore-Roundtrip eliminieren: SpeechResult direkt als URL-Parameter
-- STT-Modell: `latest_short` statt Chirp → schnellere Transkription
+**Fix:** In `/call/process` als **allererstes** (vor Keyword-Erkennung und RAG):
+`get_pending_contact(call_sid)` aufrufen (ohne delete).
+- Wenn `stage == "anliegen"` → SpeechResult als `anliegen` speichern, stage auf `"kontakt"` setzen,
+  TwiML: "Darf ich Ihre Rückruf-Nummer und E-Mail-Adresse notieren?"
+  → Gather + Redirect zu `/call/process_contact`
+- Wenn `stage == "kontakt"` → sollte nicht vorkommen, Fallback zu process_contact
 
-### 3. Multi-Datastore RAG (FIBU + ERP) ← GEPLANT
-Konzept: Zwei getrennte Vertex AI Search Datastores statt einem.
+### 2. Bug: "Computer" wird als HR statt IT erkannt
+IT-Keywords prüfen und ergänzen: "computer", "startet nicht", "drucker", "netzwerk", "login", "passwort".
+Reihenfolge der Kategorie-Prüfung: IT vor HR.
 
-**Neue Datastores:**
-- `handbuecher-v2` (bereits vorhanden) → syska ProFI FIBU
-- `handbuecher-erp` (neu anlegen) → ERP (NUG) Dokumentation
-
-**Neue Env-Vars:**
-```
-VERTEX_SEARCH_DATASTORE_FIBU=handbuecher-v2
-VERTEX_SEARCH_DATASTORE_ERP=handbuecher-erp
-```
-
-**Routing-Logik in rag_service.py:**
-- FIBU-Keywords (Buchung, Konto, OPos...) → handbuecher-v2
-- ERP-Keywords (Artikel, Auftrag, Lager...) → handbuecher-erp
-- Schnittstellenfragen (z.B. "Rechnung aus ERP kommt nicht in Fibu") → beide Datastores, Ergebnisse zusammenführen
-
-**Umsetzungsschritte:**
-1. Datastore + Engine in GCP Console anlegen (global, Enterprise)
-2. ERP-Doku in GCS hochladen + indexieren (siehe unten)
-3. Env-Vars in Cloud Run setzen
-4. rag_service.py: `_detect_datastore()` Funktion + dual-query bei "both"
-5. System-Prompt um FIBU↔ERP Integrationskontext erweitern
-6. test_scenarios.bat um ERP-Schnittstellenfragen erweitern
-
-**Hintergrund:** FIBU ist an ERP angebunden — Ausgangsrechnungen aus ERP
-erzeugen automatisch OPos in der FIBU. Agent muss beide Kontexte kennen.
-
-**Doku-Quelle:** Netzlaufwerk M:\doku (2,39 GB / 3.402 Dateien / 633 Ordner)
-
-**GCS Zielstruktur:**
-```
-gs://boxwood-mantra-489408-c0-handbuecher/
-  fibu/                    ← syska ProFI (heute: handbuecher-v2)
-  erp/eevolution/          ← ERP Kerndoku
-  erp/auftrag/
-  erp/artikel/
-  erp/einkauf/
-  erp/kulimi/
-  erp/chargen/
-  erp/schnittstellen/      ← FIBU↔ERP Integration (besonders wichtig)
-  erp/inventur/
-  erp/preiskon/
-```
-
-**Upload-Befehle (Top-Priorität zuerst):**
-```cmd
-gsutil -m cp -r "M:\doku\eevolution\*"      gs://boxwood-mantra-489408-c0-handbuecher/erp/eevolution/
-gsutil -m cp -r "M:\doku\auftrag\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/auftrag/
-gsutil -m cp -r "M:\doku\artikel\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/artikel/
-gsutil -m cp -r "M:\doku\schnittstellen\*"  gs://boxwood-mantra-489408-c0-handbuecher/erp/schnittstellen/
-gsutil -m cp -r "M:\doku\ProFi\*"           gs://boxwood-mantra-489408-c0-handbuecher/fibu/
-gsutil -m cp -r "M:\doku\einkauf\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/einkauf/
-gsutil -m cp -r "M:\doku\kulimi\*"          gs://boxwood-mantra-489408-c0-handbuecher/erp/kulimi/
-gsutil -m cp -r "M:\doku\chargen\*"         gs://boxwood-mantra-489408-c0-handbuecher/erp/chargen/
-gsutil -m cp -r "M:\doku\inventur\*"        gs://boxwood-mantra-489408-c0-handbuecher/erp/inventur/
-gsutil -m cp -r "M:\doku\preiskon\*"        gs://boxwood-mantra-489408-c0-handbuecher/erp/preiskon/
-```
-
-**Nicht hochladen:** auswahlprozess neue fibu, AT_Mandant_Sopra, aton, citrix,
-barcode, patlite, waagen, excel, grafik, xml, sql, sql-server2005,
-projektplan .net umstellung, eevolutiondms, *.msg, *.lnk,
-"kunden bestellungen details.xlsx" (Kundendaten — niemals hochladen!)
-
-### 4. E-Mail Service implementieren ← NÄCHSTES HAUPTZIEL
-Neues File: `app/services/email_service.py` via SendGrid
-
-Neue Env-Vars:
-```
-SENDGRID_API_KEY=...
-```
-
-E-Mail Adressen:
-- ERP Support: erp-support@sopra-system.com
-- EVS Support: evs-support@sopra-system.com
-- HR Support: hr-support@sopra-system.com
-- IT Support: it-support@sopra-system.com
-- Verwaltung: Stephan.Mueller@sopra-system.com
-
-### 4. Outlook-Kalender Integration ← WARTET AUF IT-ADMIN
+### 3. DNS-Records für ki-agent@sopra-system.com ← WARTET AUF PATRICK
 Ansprechpartner: Patrick Münchhoff, DW 82
-Benötigt: Azure App Registration mit Calendars.Read
 
-Technischer Plan:
-- Cloud Scheduler alle 15 Min → liest Outlook → schreibt Status in Firestore
-- Firestore: calendar_status/Stephan.Mueller@sopra-system.com
-- Felder: status (verfügbar/meeting/abwesend), bis (Uhrzeit)
-
-Benötigte Env-Vars:
+4 DNS-Records in SendGrid Dashboard (Settings → Sender Authentication):
 ```
-AZURE_TENANT_ID=...
-AZURE_CLIENT_ID=...
-AZURE_CLIENT_SECRET=...
-OUTLOOK_USER_EMAIL=Stephan.Mueller@sopra-system.com
+CNAME  em4101.sopra-system.com        → u105946128.wl129.sendgrid.net
+CNAME  s1._domainkey.sopra-system.com → s1.domainkey.u105946128.wl129.sendgrid.net
+CNAME  s2._domainkey.sopra-system.com → s2.domainkey.u105946128.wl129.sendgrid.net
+TXT    _dmarc.sopra-system.com        → v=DMARC1; p=quarantine;
 ```
+Nach DNS-Setup: `EMAIL_FROM` in Cloud Run auf `ki-agent@sopra-system.com` ändern.
 
-### 5. Qualität
+### 4. E-Mail Header anpassen
+"KI-Telefon-Agent — Anruf-Weiterleitung / SOPRA System GmbH" →
+"Sofia – Assistent Stephan Müller" in `email_service.py` HTML-Template.
+
+### 5. Multi-Datastore RAG (FIBU + ERP) ← GEPLANT
+Zweiter Vertex AI Search Datastore `handbuecher-erp` für ERP-Dokumentation.
+ERP-Doku Upload von M:\doku (2,39 GB).
+Routing: FIBU-Keywords → handbuecher-v2, ERP-Keywords → handbuecher-erp.
+
+### 6. Outlook-Kalender Integration ← WARTET AUF IT-ADMIN
+Ansprechpartner: Patrick Münchhoff, DW 82
+Azure App Registration mit Calendars.Read benötigt.
+
+### 7. Qualität
 - Szenario 7 verfeinern: Verwaltungs-Anfragen vs. FIBU/OPos besser trennen
-  - "Rechnung an Kunden" = OPos/FIBU
-  - "Unsere Rechnung, Wartungsvertrag, Lizenz" = Verwaltung → Stephan Müller
-- Durchwahl-Aussprache: SSML `<say-as interpret-as="telephone">` in TwiML
-- Supportfälle 6–8 hochladen:
-  ```cmd
-  gsutil cp supportfaelle_syska_profi.txt gs://boxwood-mantra-489408-c0-handbuecher/
-  ```
+- SSML `<say-as interpret-as="telephone">` für Durchwahl-Aussprache
 - Intent-Classifier: FIBU / OPos / Kore / Anbu / Sonstiges
+- Ticketnummer-Vergabe bei E-Mail-Weiterleitung (Vorstufe Helpdesk)
 
-### 6. Infrastruktur
+### 8. Infrastruktur
 - Error Handling & Cloud Logging Alerts
 - Health Checks einrichten
+- LATENCY_LOGGING nach weiteren Tests dauerhaft auf false
 
 ## Wichtige Architektur-Entscheidungen
 
+- Agent-Name: Sofia (digitaler Assistent von Stephan Müller)
 - Vertex AI Search läuft unter locations/global
 - Gemini läuft unter us-central1
 - Enterprise Edition → Extractive Answers → vollständige Textpassagen
-- Firestore: Conversation Memory + Pending-Cache für Redirect
+- Firestore: Conversation Memory + Pending-Cache + pending_contact (3 Collections)
 - Telefonbuch direkt im System-Prompt als Text (35 Einträge)
 - XML-Escaping in twiml_builder.py verhindert abgeschnittene Antworten
-- Keine direkte Weiterleitung möglich — Agent nennt Durchwahl oder bietet E-Mail
-- MCP-Server: noch nicht integriert (Latenz-Overhead, Gemini nutzt Function Calling nativ)
-- speechTimeout=3s — Haupthebel Latenz (von ~15s auf ~7s erwartet)
+- Keine direkte Weiterleitung möglich — Agent nennt Durchwahl nur als letzten Fallback
+- Kontaktdaten-Flow: Anliegen → Kontaktdaten → E-Mail ODER Durchwahl bei Ablehnung
+- Gesprächszusammenfassung per Gemini statt rohem Protokoll in E-Mail
+- speechTimeout=3s (FIBU-Flow), 7s (Routing-Flow)
 - PowerShell in VS Code → immer Command Prompt verwenden
 - Test: test_scenarios.bat im Projektordner ausführen
