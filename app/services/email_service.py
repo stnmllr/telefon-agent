@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+from app.services.rag_service import summarize_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ CATEGORY_EMAILS = {
 }
 
 
-def send_routing_email(
+async def send_routing_email(
     category: str,
     caller_number: str,
     user_question: str,
@@ -59,14 +60,7 @@ def send_routing_email(
     contact_phone = contact.get("phone") or "nicht angegeben"
     contact_email = contact.get("email") or "nicht angegeben"
 
-    protocol_lines = []
-    for i, turn in enumerate(conversation_history, start=1):
-        role = "Anrufer" if turn.get("role") == "user" else "Agent  "
-        content = turn.get("content", "").strip()
-        if content:
-            protocol_lines.append(f"[{i}] {role}: {content}")
-
-    protocol_text = "\n".join(protocol_lines) if protocol_lines else "(kein Protokoll verfügbar)"
+    summary = await summarize_conversation(conversation_history)
 
     category_label = {
         "erp":        "ERP-Anfrage",
@@ -96,9 +90,9 @@ ANLIEGEN DES ANRUFERS:
 {user_question}
 
 ─────────────────────────────────────────
-GESPRÄCHSPROTOKOLL
+GESPRÄCHSZUSAMMENFASSUNG
 ─────────────────────────────────────────
-{protocol_text}
+{summary}
 
 ─────────────────────────────────────────
 Bitte nehmen Sie bei Bedarf Kontakt mit dem Anrufer auf.
@@ -106,16 +100,6 @@ Bitte nehmen Sie bei Bedarf Kontakt mit dem Anrufer auf.
 Mit freundlichen Grüßen
 KI-Telefon-Agent — SOPRA System GmbH
 """
-
-    protocol_html = "".join(
-        f"<tr style='background:{'#f9f9f9' if i % 2 == 0 else '#ffffff'}'>"
-        f"<td style='padding:6px 12px;color:#888;font-size:12px;white-space:nowrap'>[{i}]</td>"
-        f"<td style='padding:6px 12px;font-weight:bold;white-space:nowrap'>{'Anrufer' if t.get('role') == 'user' else 'Agent'}</td>"
-        f"<td style='padding:6px 12px'>{t.get('content', '').strip()}</td>"
-        f"</tr>"
-        for i, t in enumerate(conversation_history, start=1)
-        if t.get("content", "").strip()
-    )
 
     html_body = f"""
 <html><body style="font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto">
@@ -147,10 +131,8 @@ KI-Telefon-Agent — SOPRA System GmbH
     <p style="margin:6px 0 0;font-size:15px">{user_question}</p>
   </div>
 
-  <h3 style="font-size:14px;color:#555;margin-bottom:8px">Gesprächsprotokoll</h3>
-  <table style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid #eee;border-radius:4px">
-    {protocol_html if protocol_html else '<tr><td style="padding:12px;color:#999">Kein Protokoll verfügbar</td></tr>'}
-  </table>
+  <h3 style="font-size:14px;color:#555;margin-bottom:8px">Gesprächszusammenfassung</h3>
+  <p style="font-size:14px;line-height:1.6;background:#f9f9f9;padding:12px 16px;border-radius:4px;border:1px solid #eee">{summary}</p>
 
   <p style="margin-top:24px;font-size:13px;color:#888">
     Diese E-Mail wurde automatisch vom KI-Telefon-Agenten der SOPRA System GmbH generiert.

@@ -315,7 +315,7 @@ async def process_contact(
 
     # C) E-Mail senden
     history = get_history(CallSid)
-    send_routing_email(
+    await send_routing_email(
         category=pending["category"],
         caller_number=pending.get("from_number") or "Unbekannt",
         user_question=pending["speech_result"],
