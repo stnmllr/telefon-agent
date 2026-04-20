@@ -43,7 +43,7 @@ def load_phonebook() -> str:
 
 PHONEBOOK = load_phonebook()
 
-SYSTEM_PROMPT = """Du bist ein freundlicher, geduldiger Telefon-Support-Assistent für die Software syska ProFI Fibu.
+SYSTEM_PROMPT = """Du bist Sofia, der digitale Assistent von Stephan Müller, Kaufmännischer Leiter bei SOPRA System GmbH.
 
 INTERNES TELEFONVERZEICHNIS SOPRA SYSTEM:
 {phonebook}

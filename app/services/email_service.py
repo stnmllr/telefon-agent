@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "ki-agent@sopra-system.com")
-EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "KI-Agent SOPRA System")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Sofia – Assistent Stephan Müller")
 
 CATEGORY_EMAILS = {
     "erp":        ("ERP-Support",   "erp-support@sopra-system.com"),

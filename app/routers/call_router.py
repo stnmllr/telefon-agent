@@ -96,8 +96,7 @@ async def incoming_call():
 
     twiml = build_welcome_twiml(
         message=(
-            "Guten Tag, Sie sind verbunden mit dem SOPRA System Assistenten. "
-            "Ich bin ein Künstliche Intelligenz Assistent und helfe Ihnen gerne weiter. "
+            "Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller. "
             "Was kann ich für Sie tun?"
         ),
         transcribe_url="/call/transcribe",
@@ -170,16 +169,7 @@ async def transcribe(
     except Exception as exc:
         logger.exception("[TRANSCRIBE] Firestore-Speichern fehlgeschlagen: %s", exc)
 
-    is_long_input = len(SpeechResult.split()) > 5
-
-    if is_long_input:
-        twiml = """<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say language="de-DE" voice="Google.de-DE-Neural2-F">Einen Moment bitte, ich schaue das für Sie nach.</Say>
-  <Redirect method="POST">/call/process</Redirect>
-</Response>"""
-    else:
-        twiml = """<?xml version="1.0" encoding="UTF-8"?>
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Redirect method="POST">/call/process</Redirect>
 </Response>"""
