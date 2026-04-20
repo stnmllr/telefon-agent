@@ -240,7 +240,24 @@ async def process(
         return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------
-    # B) RAG + LLM
+    # B) Routing-Prüfung VOR RAG/LLM
+    # --------------------------------------------------------
+    category = _detect_routing_category(speech_result)
+    if category:
+        logger.info("[PROCESS] Kategorie erkannt: %s — überspringe RAG, frage Kontaktdaten ab", category)
+        try:
+            save_pending_contact(CallSid, category, speech_result, from_number)
+        except Exception as exc:
+            logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
+        if lat_logger:
+            lat_logger.mark("routing_match")
+            lat_logger.finish()
+        return Response(content=_build_contact_request_twiml(), media_type="application/xml")
+
+    logger.info("[PROCESS] Kein Routing-Match, gehe zu RAG")
+
+    # --------------------------------------------------------
+    # C) RAG + LLM
     # --------------------------------------------------------
     try:
         answer = await answer_question(
@@ -259,20 +276,6 @@ async def process(
             transcribe_url="/call/transcribe",
         )
         return Response(content=twiml, media_type="application/xml")
-
-    # --------------------------------------------------------
-    # C) Routing erkannt → Kontaktdaten erfragen
-    # --------------------------------------------------------
-    category = _detect_routing_category(speech_result)
-    if category:
-        try:
-            save_pending_contact(CallSid, category, speech_result, from_number)
-        except Exception as exc:
-            logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
-        if lat_logger:
-            lat_logger.mark("tts_ready")
-            lat_logger.finish()
-        return Response(content=_build_contact_request_twiml(), media_type="application/xml")
 
     # --------------------------------------------------------
     # D) Antwort als TwiML zurückgeben
