@@ -43,6 +43,16 @@ echo ========================================
 curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Nein danke tschuess" -d "Confidence=0.9" -d "CallSid=test-s8"
 echo.
 echo ========================================
+echo SZENARIO 9a: Verwaltung - Kontaktdaten-Rueckfrage ausloesen
+echo ========================================
+curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Mein Name ist Einmueller, ich habe eine Frage zu meinem Vertrag. Welche Module haben wir in der Fibu im Einsatz?" -d "Confidence=0.9" -d "CallSid=test-s9" -d "From=%%2B4989123456"
+echo.
+echo ========================================
+echo SZENARIO 9b: Kontaktdaten nennen und E-Mail ausloesen
+echo ========================================
+curl -s -X POST %BASE_URL%/call/process_contact -d "SpeechResult=Meine Nummer ist 089 12345 und meine Email ist einmueller at test punkt de" -d "CallSid=test-s9"
+echo.
+echo ========================================
 echo ALLE TESTS ABGESCHLOSSEN
 echo ========================================
 pause

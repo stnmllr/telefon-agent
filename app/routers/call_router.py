@@ -11,7 +11,13 @@ from fastapi import APIRouter, Form
 from fastapi.responses import Response
 from google.cloud import firestore
 
-from app.services.rag_service import answer_question
+from app.services.rag_service import answer_question, extract_contact_data
+from app.services.memory_service import (
+    get_history,
+    save_pending_contact,
+    get_and_delete_pending_contact,
+)
+from app.services.email_service import send_routing_email
 from app.config import settings
 from app.utils.latency_logger import LatencyLogger
 from app.utils.twiml_builder import (
@@ -25,6 +31,42 @@ db = firestore.Client()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/call")
+
+_ERP_KEYWORDS = {"erp", "warenwirtschaft", "auftrag", "lieferschein", "artikel",
+                  "kulimi", "kundenverwaltung", "produktion", "inventur", "lager"}
+_EVS_KEYWORDS = {"evs", "zeiterfassung"}
+_HR_KEYWORDS = {"hr", "personal", "urlaub", "gehalt", "arbeitsvertrag", "krankmeldung"}
+_IT_KEYWORDS = {"computer", "netzwerk", "drucker", "internet", "it-support",
+                 "software", "login", "passwort", "bildschirm", "laptop", "server"}
+_VERWALTUNG_KEYWORDS = {"vertrag", "rechnung", "preis", "angebot", "wartung",
+                         "lizenz", "abrechnung", "verwaltung"}
+
+
+def _detect_routing_category(text: str) -> str | None:
+    lower = text.lower()
+    if any(kw in lower for kw in _ERP_KEYWORDS):
+        return "erp"
+    if any(kw in lower for kw in _EVS_KEYWORDS):
+        return "evs"
+    if any(kw in lower for kw in _HR_KEYWORDS):
+        return "hr"
+    if any(kw in lower for kw in _IT_KEYWORDS):
+        return "it"
+    if any(kw in lower for kw in _VERWALTUNG_KEYWORDS):
+        return "verwaltung"
+    return None
+
+
+def _build_contact_request_twiml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="/call/process_contact" method="POST"
+          language="de-DE" speechTimeout="5">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Gerne leite ich Ihre Anfrage weiter. Darf ich kurz Ihre Rückruf-Nummer und E-Mail-Adresse notieren?</Say>
+  </Gather>
+  <Redirect method="POST">/call/process_contact</Redirect>
+</Response>"""
+
 
 FAREWELL_KEYWORDS = [
     "nein danke",
@@ -72,6 +114,7 @@ async def transcribe(
     SpeechResult: str = Form(default=""),
     Confidence: float = Form(default=0.0),
     CallSid: str = Form(default=""),
+    From: str = Form(default=""),
 ):
     """
     Twilio liefert hier das STT-Ergebnis. Diese Funktion entscheidet:
@@ -122,6 +165,7 @@ async def transcribe(
     try:
         db.collection("pending").document(CallSid).set({
             "speech_result": SpeechResult,
+            "from_number": From,
         })
     except Exception as exc:
         logger.exception("[TRANSCRIBE] Firestore-Speichern fehlgeschlagen: %s", exc)
@@ -150,6 +194,7 @@ async def transcribe(
 async def process(
     CallSid: str = Form(default=""),
     SpeechResult: str = Form(default=""),
+    From: str = Form(default=""),
 ):
     """
     Liest SpeechResult aus Firestore, ruft RAG/LLM auf und
@@ -168,11 +213,14 @@ async def process(
     # A) SpeechResult aus Firestore laden und löschen
     # --------------------------------------------------------
     speech_result = ""
+    from_number = From
     try:
         ref = db.collection("pending").document(CallSid)
         doc = ref.get()
         if doc.exists:
-            speech_result = doc.to_dict().get("speech_result", "")
+            data = doc.to_dict()
+            speech_result = data.get("speech_result", "")
+            from_number = data.get("from_number", From)
             ref.delete()
         else:
             logger.warning("[PROCESS] Kein pending-Eintrag für CallSid=%s", CallSid)
@@ -213,6 +261,20 @@ async def process(
         return Response(content=twiml, media_type="application/xml")
 
     # --------------------------------------------------------
+    # C) Routing erkannt → Kontaktdaten erfragen
+    # --------------------------------------------------------
+    category = _detect_routing_category(speech_result)
+    if category:
+        try:
+            save_pending_contact(CallSid, category, speech_result, from_number)
+        except Exception as exc:
+            logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
+        if lat_logger:
+            lat_logger.mark("tts_ready")
+            lat_logger.finish()
+        return Response(content=_build_contact_request_twiml(), media_type="application/xml")
+
+    # --------------------------------------------------------
     # D) Antwort als TwiML zurückgeben
     # --------------------------------------------------------
     twiml = build_answer_twiml(
@@ -224,4 +286,48 @@ async def process(
         lat_logger.mark("tts_ready")
         lat_logger.finish()
 
+    return Response(content=twiml, media_type="application/xml")
+
+
+# ============================================================
+# 4) Kontaktdaten entgegennehmen und E-Mail senden
+# ============================================================
+@router.post("/process_contact")
+async def process_contact(
+    CallSid: str = Form(default=""),
+    SpeechResult: str = Form(default=""),
+):
+    logger.info("[PROCESS_CONTACT] CallSid=%s | SpeechResult='%s'", CallSid, SpeechResult)
+
+    # A) Routing-Kontext aus Firestore laden
+    pending = get_and_delete_pending_contact(CallSid)
+    if not pending:
+        logger.warning("[PROCESS_CONTACT] Kein pending_contact für CallSid=%s", CallSid)
+        twiml = build_fallback_twiml(
+            message="Entschuldigung, es ist ein Fehler aufgetreten.",
+            transcribe_url="/call/transcribe",
+        )
+        return Response(content=twiml, media_type="application/xml")
+
+    # B) Kontaktdaten per Gemini extrahieren
+    caller_contact = await extract_contact_data(SpeechResult)
+    logger.info("[PROCESS_CONTACT] Extrahiert: %s", caller_contact)
+
+    # C) E-Mail senden
+    history = get_history(CallSid)
+    send_routing_email(
+        category=pending["category"],
+        caller_number=pending.get("from_number") or "Unbekannt",
+        user_question=pending["speech_result"],
+        conversation_history=history,
+        call_sid=CallSid,
+        caller_contact=caller_contact,
+    )
+
+    # D) Verabschiedung
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Ich habe Ihre Anfrage weitergeleitet. Sie werden sich in Kürze bei Ihnen melden. Auf Wiederhören.</Say>
+  <Hangup/>
+</Response>"""
     return Response(content=twiml, media_type="application/xml")

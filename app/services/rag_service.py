@@ -1,4 +1,5 @@
 import csv
+import json
 import logging
 import os
 import google.auth
@@ -291,3 +292,32 @@ async def answer_question(question: str, call_sid: str = "", lat_logger=None) ->
             "Es tut mir leid, ich habe gerade ein technisches Problem. "
             "Bitte versuchen Sie es erneut oder bleiben Sie in der Leitung."
         )
+
+
+async def extract_contact_data(speech_result: str) -> dict:
+    """Extrahiert Telefonnummer und E-Mail aus natürlichsprachlicher Eingabe via Gemini."""
+    if not speech_result.strip():
+        return {"phone": "", "email": ""}
+    try:
+        llm = ChatVertexAI(
+            model_name=settings.gemini_model,
+            project=settings.gcp_project_id,
+            location=settings.gcp_location,
+            temperature=0.0,
+            max_output_tokens=100,
+        )
+        prompt = (
+            f"Extrahiere Telefonnummer und E-Mail-Adresse aus folgendem Text: '{speech_result}'. "
+            "Antworte ausschließlich als JSON ohne Markdown-Formatierung: "
+            '{"phone": "...", "email": "..."} '
+            "Fehlende Werte als leeren String."
+        )
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        data = json.loads(response.content.strip())
+        return {
+            "phone": str(data.get("phone", "")),
+            "email": str(data.get("email", "")),
+        }
+    except Exception as e:
+        logger.warning("Kontaktdaten-Extraktion fehlgeschlagen: %s", e)
+        return {"phone": "", "email": ""}

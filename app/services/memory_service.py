@@ -54,3 +54,36 @@ def clear_history(call_sid: str):
         db.collection("conversations").document(call_sid).delete()
     except Exception as e:
         logger.error("Memory löschen fehlgeschlagen: %s", e)
+
+
+def save_pending_contact(
+    call_sid: str,
+    category: str,
+    speech_result: str,
+    from_number: str,
+) -> None:
+    """Speichert Routing-Kontext bevor Kontaktdaten erfragt werden."""
+    try:
+        db.collection("pending_contact").document(call_sid).set({
+            "category": category,
+            "speech_result": speech_result,
+            "from_number": from_number,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        logger.error("pending_contact speichern fehlgeschlagen: %s", e)
+
+
+def get_and_delete_pending_contact(call_sid: str) -> dict | None:
+    """Liest und löscht pending_contact/{call_sid}. Gibt None zurück falls nicht vorhanden."""
+    try:
+        ref = db.collection("pending_contact").document(call_sid)
+        doc = ref.get()
+        if not doc.exists:
+            return None
+        data = doc.to_dict()
+        ref.delete()
+        return data
+    except Exception as e:
+        logger.error("pending_contact lesen fehlgeschlagen: %s", e)
+        return None
