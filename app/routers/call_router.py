@@ -7,6 +7,7 @@
 # ============================================================
 
 import logging
+import re
 from fastapi import APIRouter, Form
 from fastapi.responses import Response
 from google.cloud import firestore
@@ -45,17 +46,25 @@ _VERWALTUNG_KEYWORDS = {"vertrag", "rechnung", "preis", "angebot", "wartung",
                          "lizenz", "abrechnung", "verwaltung"}
 
 
+def _kw_match(text: str, keywords: set) -> bool:
+    """Word-Boundary-Matching — verhindert Substring-Fehltreffer (z.B. 'hr' in 'mehr')."""
+    for kw in keywords:
+        if re.search(r'\b' + re.escape(kw) + r'\b', text):
+            return True
+    return False
+
+
 def _detect_routing_category(text: str) -> str | None:
     lower = text.lower()
-    if any(kw in lower for kw in _ERP_KEYWORDS):
+    if _kw_match(lower, _ERP_KEYWORDS):
         return "erp"
-    if any(kw in lower for kw in _EVS_KEYWORDS):
+    if _kw_match(lower, _EVS_KEYWORDS):
         return "evs"
-    if any(kw in lower for kw in _IT_KEYWORDS):
+    if _kw_match(lower, _IT_KEYWORDS):
         return "it"
-    if any(kw in lower for kw in _HR_KEYWORDS):
+    if _kw_match(lower, _HR_KEYWORDS):
         return "hr"
-    if any(kw in lower for kw in _VERWALTUNG_KEYWORDS):
+    if _kw_match(lower, _VERWALTUNG_KEYWORDS):
         return "verwaltung"
     return None
 
