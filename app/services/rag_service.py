@@ -15,6 +15,34 @@ logger = logging.getLogger(__name__)
 
 _PHONEBOOK_CSV = os.path.join(os.path.dirname(__file__), "..", "data", "telefonbuch.csv")
 
+# --- Multi-Datastore Konfiguration ---
+_DS_FIBU = os.environ.get("VERTEX_SEARCH_DATASTORE_FIBU", "") or os.environ.get("VERTEX_SEARCH_DATASTORE", "handbuecher-v2")
+_DS_ERP  = os.environ.get("VERTEX_SEARCH_DATASTORE_ERP", "")
+
+_ERP_DS_KEYWORDS = {
+    "auftrag", "warenwirtschaft", "artikel", "lieferant", "einkauf",
+    "inventur", "kulimi", "chargen", "preiskonditionen", "staffelpreis",
+    "bestellung", "disposition", "eevolution", "lager", "scanner",
+    "kontrakt", "retoure",
+}
+_SCHNITTSTELLEN_KEYWORDS = {
+    "schnittstelle", "integration", "buchungsübergabe",
+    "übergabe an fibu", "erp und fibu", "fibu und erp",
+}
+
+
+def _detect_datastore(question: str) -> str | list[str]:
+    """Wählt Datastore(s) anhand der Frage. Gibt einen String oder Liste zurück."""
+    lower = question.lower()
+    if any(kw in lower for kw in _SCHNITTSTELLEN_KEYWORDS):
+        logger.info("Datastore: BEIDE (Schnittstellen-Frage)")
+        return [_DS_FIBU, _DS_ERP] if _DS_ERP else _DS_FIBU
+    if _DS_ERP and any(kw in lower for kw in _ERP_DS_KEYWORDS):
+        logger.info("Datastore: ERP (%s)", _DS_ERP)
+        return _DS_ERP
+    logger.info("Datastore: FIBU (%s)", _DS_FIBU)
+    return _DS_FIBU
+
 
 _DIGIT_WORDS = {
     "0": "null", "1": "eins", "2": "zwei", "3": "drei", "4": "vier",
@@ -203,17 +231,25 @@ def _build_search_query(question: str, history: list) -> str:
     return question
 
 
-def _search_datastore(question: str) -> str:
+def _search_datastore(question: str, datastore_id: str | None = None, page_size: int | None = None) -> str:
     token = _get_access_token()
-    url = (
-        f"https://discoveryengine.googleapis.com/v1/projects/"
-        f"{settings.gcp_project_id}/locations/{settings.vertex_search_location}"
-        f"/collections/default_collection/engines/{settings.vertex_search_engine_id}"
-        f"/servingConfigs/default_config:search"
-    )
+    if datastore_id:
+        url = (
+            f"https://discoveryengine.googleapis.com/v1/projects/"
+            f"{settings.gcp_project_id}/locations/{settings.vertex_search_location}"
+            f"/collections/default_collection/dataStores/{datastore_id}"
+            f"/servingConfigs/default_config:search"
+        )
+    else:
+        url = (
+            f"https://discoveryengine.googleapis.com/v1/projects/"
+            f"{settings.gcp_project_id}/locations/{settings.vertex_search_location}"
+            f"/collections/default_collection/engines/{settings.vertex_search_engine_id}"
+            f"/servingConfigs/default_config:search"
+        )
     payload = {
         "query": question,
-        "pageSize": settings.rag_top_k,
+        "pageSize": page_size if page_size is not None else settings.rag_top_k,
         "contentSearchSpec": {
             "snippetSpec": {"returnSnippet": True},
             "extractiveContentSpec": {
@@ -252,7 +288,15 @@ async def answer_question(question: str, call_sid: str = "", lat_logger=None) ->
         search_query = _build_search_query(question, history)
         if lat_logger:
             lat_logger.mark("rag_start")
-        context = _search_datastore(search_query)
+        datastore = _detect_datastore(search_query)
+        if isinstance(datastore, list):
+            per_ds = max(1, settings.rag_top_k // 2)
+            passages_fibu = _search_datastore(search_query, datastore_id=datastore[0], page_size=per_ds)
+            passages_erp  = _search_datastore(search_query, datastore_id=datastore[1], page_size=per_ds)
+            context = "\n\n".join(filter(None, [passages_fibu, passages_erp]))
+        else:
+            ds_id = datastore if datastore != _DS_FIBU or not settings.vertex_search_engine_id else None
+            context = _search_datastore(search_query, datastore_id=ds_id)
         if lat_logger:
             lat_logger.mark("rag_done")
 
