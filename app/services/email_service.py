@@ -124,7 +124,7 @@ KI-Telefon-Agent — SOPRA System GmbH
   <p style="font-size:14px;line-height:1.6;background:#f9f9f9;padding:12px 16px;border-radius:4px;border:1px solid #eee">{summary}</p>
 
   <p style="margin-top:24px;font-size:13px;color:#888">
-    Diese E-Mail wurde automatisch vom KI-Telefon-Agenten der SOPRA System GmbH generiert.
+    Diese E-Mail wurde automatisch von Sofia, dem digitalen Assistenten von Stephan Müller, generiert.
   </p>
 </div>
 </body></html>

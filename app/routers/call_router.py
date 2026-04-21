@@ -405,10 +405,18 @@ async def process_contact(
         caller_contact=caller_contact,
     )
 
-    # E) Bestätigung + Verabschiedung
-    twiml = """<?xml version="1.0" encoding="UTF-8"?>
+    # E) Bestätigung + Verabschiedung (kategoriespezifisch)
+    _FAREWELL_BY_CATEGORY = {
+        "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
+        "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
+        "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
+        "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
+        "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
+    }
+    farewell_msg = _FAREWELL_BY_CATEGORY.get(category, "Vielen Dank. Ihre Anfrage wurde weitergeleitet. Auf Wiederhören.")
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Ihre Anfrage wurde weitergeleitet. Sie werden sich in Kürze bei Ihnen melden. Auf Wiederhören.</Say>
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">{farewell_msg}</Say>
   <Hangup/>
 </Response>"""
     return Response(content=twiml, media_type="application/xml")
