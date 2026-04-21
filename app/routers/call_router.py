@@ -99,6 +99,44 @@ def _is_refusal(text: str) -> bool:
     return any(kw in lower for kw in _REFUSAL_KEYWORDS)
 
 
+_CONSENT_KEYWORDS = {"ja", "gerne", "ja gerne", "bitte", "gern", "natürlich", "klar", "okay", "ok"}
+
+
+def _is_consent(text: str) -> bool:
+    lower = text.strip().lower()
+    return any(kw in lower for kw in _CONSENT_KEYWORDS) and not _is_refusal(text)
+
+
+_STT_NAME_VARIANTS = {
+    "stefan": "stephan",
+    "stefanie": "stephanie",
+}
+
+
+def _normalize_stt_names(text: str) -> str:
+    """Korrigiert bekannte STT-Namensvarianten vor Routing und LLM-Aufruf."""
+    result = text
+    for variant, canonical in _STT_NAME_VARIANTS.items():
+        result = re.sub(r'\b' + re.escape(variant) + r'\b', canonical, result, flags=re.IGNORECASE)
+    return result
+
+
+_PHONEBOOK_INTENT_RE = [
+    re.compile(r'\bmöchte\b.{0,50}\bsprechen\b'),
+    re.compile(r'\bwill\b.{0,50}\bsprechen\b'),
+    re.compile(r'\bkann ich\b.{0,50}\bsprechen\b'),
+    re.compile(r'\bsuche?\b'),
+    re.compile(r'\bverbinden\b'),
+    re.compile(r'\bdurchwahl\b'),
+]
+
+
+def _detect_phonebook_intent(text: str) -> bool:
+    """Erkennt Telefonbuch-Anfragen: Personen suchen, Durchwahl, Verbindungswunsch."""
+    lower = text.lower()
+    return any(pat.search(lower) for pat in _PHONEBOOK_INTENT_RE)
+
+
 _ANLIEGEN_PROMPTS = {
     "erp":        "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr ERP-Problem.",
     "evs":        "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr EVS-Problem.",
@@ -126,6 +164,17 @@ def _build_contact_offer_twiml() -> str:
   <Gather input="speech" action="/call/process_contact" method="POST"
           language="de-DE" speechTimeout="7">
     <Say language="de-DE" voice="Google.de-DE-Neural2-F">Darf ich kurz Ihre Rückruf-Nummer notieren?</Say>
+  </Gather>
+  <Redirect method="POST">/call/process_contact</Redirect>
+</Response>"""
+
+
+def _build_retry_phone_twiml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="/call/process_contact" method="POST"
+          language="de-DE" speechTimeout="7">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Wie lautet Ihre Rückrufnummer?</Say>
   </Gather>
   <Redirect method="POST">/call/process_contact</Redirect>
 </Response>"""
@@ -292,6 +341,8 @@ async def process(
         )
         return Response(content=twiml, media_type="application/xml")
 
+    speech_result = _normalize_stt_names(speech_result)
+
     # --------------------------------------------------------
     # B) Routing-Flow (stage-basiert, vor RAG/LLM)
     # --------------------------------------------------------
@@ -310,8 +361,11 @@ async def process(
             lat_logger.finish()
         return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
 
-    # Schritt 1: Neue Kategorie erkennen
-    category = _detect_routing_category(speech_result)
+    # Schritt 1: Neue Kategorie erkennen — Telefonbuch-Intent überspringt Routing
+    is_phonebook = _detect_phonebook_intent(speech_result)
+    if is_phonebook:
+        logger.info("[PROCESS] Telefonbuch-Intent erkannt, überspringe Support-Routing. CallSid=%s", CallSid)
+    category = None if is_phonebook else _detect_routing_category(speech_result)
     if category:
         word_count = len(speech_result.split())
         logger.info("[PROCESS] Kategorie erkannt: %s | Wörter: %d | CallSid=%s", category, word_count, CallSid)
@@ -388,8 +442,8 @@ async def process_contact(
 ):
     logger.info("[PROCESS_CONTACT] CallSid=%s | SpeechResult='%s'", CallSid, SpeechResult)
 
-    # A) Routing-Kontext aus Firestore laden
-    pending = get_and_delete_pending_contact(CallSid)
+    # A) Routing-Kontext aus Firestore laden (OHNE löschen — erst am Ende)
+    pending = get_pending_contact(CallSid)
     if not pending:
         logger.warning("[PROCESS_CONTACT] Kein pending_contact für CallSid=%s", CallSid)
         twiml = build_fallback_twiml(
@@ -399,10 +453,12 @@ async def process_contact(
         return Response(content=twiml, media_type="application/xml")
 
     category = pending["category"]
+    stage = pending.get("stage", "kontakt")
 
     # B) Ablehnung erkennen → Durchwahl nennen (Schritt 3b)
     if _is_refusal(SpeechResult):
         logger.info("[PROCESS_CONTACT] Ablehnung erkannt, nenne Durchwahl. CallSid=%s", CallSid)
+        get_and_delete_pending_contact(CallSid)
         team_name, ext_words = _CATEGORY_EXTENSIONS.get(category, ("dem Support-Team", ""))
         if ext_words:
             msg = f"Kein Problem. Sie erreichen {team_name} direkt unter Durchwahl {ext_words}. Auf Wiederhören."
@@ -415,12 +471,29 @@ async def process_contact(
 </Response>"""
         return Response(content=twiml, media_type="application/xml")
 
-    # C) Kontaktdaten per Gemini extrahieren (Schritt 3a)
+    # C) Kontaktdaten per Gemini extrahieren
     caller_contact = await extract_contact_data(SpeechResult)
-    logger.info("[PROCESS_CONTACT] Extrahiert: %s", caller_contact)
+    logger.info("[PROCESS_CONTACT] Extrahiert: %s | Stage=%s", caller_contact, stage)
     save_message(CallSid, "user", SpeechResult)
 
-    # D) E-Mail senden — Anliegen aus pending, Kontaktdaten aus Gemini-Extraktion
+    # D) Zustimmung ohne Nummer beim ersten Versuch → einmal nachfragen
+    if not caller_contact.get("phone") and stage == "kontakt" and _is_consent(SpeechResult):
+        logger.info("[PROCESS_CONTACT] Zustimmung ohne Nummer — frage erneut nach. CallSid=%s", CallSid)
+        try:
+            update_pending_contact(CallSid, stage="kontakt_retry")
+        except Exception as exc:
+            logger.warning("[PROCESS_CONTACT] update_pending_contact fehlgeschlagen: %s", exc)
+        return Response(content=_build_retry_phone_twiml(), media_type="application/xml")
+
+    # E) Kein Extrakt nach Retry → Fallback auf Twilio-Nummer
+    if not caller_contact.get("phone"):
+        fallback = pending.get("from_number", "")
+        if fallback:
+            caller_contact = {"phone": fallback}
+            logger.info("[PROCESS_CONTACT] Kein Extrakt — Fallback auf Twilio-Nummer: %s", fallback)
+
+    # F) Pending löschen und E-Mail senden
+    get_and_delete_pending_contact(CallSid)
     anliegen = pending.get("anliegen") or pending.get("speech_result", "")
     history = get_history(CallSid)
     await send_routing_email(
@@ -432,7 +505,7 @@ async def process_contact(
         caller_contact=caller_contact,
     )
 
-    # E) Bestätigung + Verabschiedung (kategoriespezifisch)
+    # G) Bestätigung + Verabschiedung (kategoriespezifisch)
     _FAREWELL_BY_CATEGORY = {
         "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
         "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
