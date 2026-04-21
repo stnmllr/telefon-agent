@@ -36,6 +36,8 @@ db = firestore.Client()
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/call")
 
+MIN_ANLIEGEN_WORDS = 15  # Schwellenwert: ab hier gilt Anliegen als ausreichend geschildert
+
 _ERP_KEYWORDS = {"erp", "warenwirtschaft", "auftrag", "lieferschein", "artikel",
                   "kulimi", "kundenverwaltung", "produktion", "inventur", "lager"}
 _EVS_KEYWORDS = {"evs", "zeiterfassung"}
@@ -97,12 +99,17 @@ def _is_refusal(text: str) -> bool:
     return any(kw in lower for kw in _REFUSAL_KEYWORDS)
 
 
+_ANLIEGEN_PROMPTS = {
+    "erp":        "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr ERP-Problem.",
+    "evs":        "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr EVS-Problem.",
+    "hr":         "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.",
+    "it":         "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr IT-Problem.",
+    "verwaltung": "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.",
+}
+
+
 def _build_anliegen_request_twiml(category: str) -> str:
-    label = _CATEGORY_LABELS.get(category, "Ihr Anliegen")
-    msg = (
-        f"Ich verstehe, es geht um {label}. "
-        "Können Sie mir Ihr Anliegen kurz schildern, damit ich es weiterleiten kann?"
-    )
+    msg = _ANLIEGEN_PROMPTS.get(category, "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.")
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech" action="/call/transcribe" method="POST"
@@ -306,17 +313,32 @@ async def process(
     # Schritt 1: Neue Kategorie erkennen
     category = _detect_routing_category(speech_result)
     if category:
-        logger.info("[PROCESS] Kategorie erkannt: %s — frage Anliegen ab. CallSid=%s", category, CallSid)
-        label = _CATEGORY_LABELS.get(category, "Ihr Anliegen")
-        save_message(CallSid, "assistant", f"Ich verstehe, es geht um {label}. Können Sie mir Ihr Anliegen kurz schildern?")
-        try:
-            save_pending_contact(CallSid, category, speech_result, from_number, stage="anliegen")
-        except Exception as exc:
-            logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
-        if lat_logger:
-            lat_logger.mark("routing_stage1")
-            lat_logger.finish()
-        return Response(content=_build_anliegen_request_twiml(category), media_type="application/xml")
+        word_count = len(speech_result.split())
+        logger.info("[PROCESS] Kategorie erkannt: %s | Wörter: %d | CallSid=%s", category, word_count, CallSid)
+        save_message(CallSid, "user", speech_result)
+        if word_count >= MIN_ANLIEGEN_WORDS:
+            # Anliegen bereits ausreichend geschildert → direkt Kontaktdaten erfragen
+            logger.info("[PROCESS] Anliegen ausreichend (%d Wörter) — überspringe Anliegen-Abfrage", word_count)
+            try:
+                save_pending_contact(CallSid, category, speech_result, from_number, stage="kontakt", anliegen=speech_result)
+            except Exception as exc:
+                logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
+            if lat_logger:
+                lat_logger.mark("routing_stage1_direct")
+                lat_logger.finish()
+            return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
+        else:
+            # Zu kurz → Anliegen nachfragen
+            prompt_text = _ANLIEGEN_PROMPTS.get(category, "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.")
+            save_message(CallSid, "assistant", prompt_text)
+            try:
+                save_pending_contact(CallSid, category, speech_result, from_number, stage="anliegen")
+            except Exception as exc:
+                logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
+            if lat_logger:
+                lat_logger.mark("routing_stage1")
+                lat_logger.finish()
+            return Response(content=_build_anliegen_request_twiml(category), media_type="application/xml")
 
     logger.info("[PROCESS] Kein Routing-Match, gehe zu RAG")
 
