@@ -117,7 +117,7 @@ def _build_contact_offer_twiml() -> str:
 <Response>
   <Gather input="speech" action="/call/process_contact" method="POST"
           language="de-DE" speechTimeout="7">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Darf ich Ihre Rückruf-Nummer und E-Mail-Adresse notieren, damit wir uns bei Ihnen melden?</Say>
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Darf ich kurz Ihre Rückruf-Nummer notieren?</Say>
   </Gather>
   <Redirect method="POST">/call/process_contact</Redirect>
 </Response>"""

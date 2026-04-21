@@ -57,8 +57,9 @@ async def send_routing_email(
     team_name, recipient_email = CATEGORY_EMAILS[category]
     now = datetime.now().strftime("%d.%m.%Y %H:%M Uhr")
     contact = caller_contact or {}
-    contact_phone = contact.get("phone") or "nicht angegeben"
-    contact_email = contact.get("email") or "nicht angegeben"
+    extracted_phone = contact.get("phone", "")
+    digits = "".join(c for c in extracted_phone if c.isdigit())
+    display_phone = extracted_phone if len(digits) >= 6 else f"{caller_number} (Anrufer-Nummer)"
 
     summary = await summarize_conversation(conversation_history)
 
@@ -80,8 +81,7 @@ der KI-Telefon-Agent hat einen Anruf weitergeleitet, der Ihr Team betrifft.
 ANRUF-DETAILS
 ─────────────────────────────────────────
 Anrufer:    {caller_number}
-Rückruf:    {contact_phone}
-E-Mail:     {contact_email}
+Rückruf:    {display_phone}
 Zeitpunkt:  {now}
 Kategorie:  {category_label}
 Call-SID:   {call_sid or '—'}
@@ -111,9 +111,7 @@ KI-Telefon-Agent — SOPRA System GmbH
     <tr><td style="padding:6px 0;color:#888;width:120px">Anrufer</td>
         <td style="padding:6px 0;font-weight:bold">{caller_number}</td></tr>
     <tr><td style="padding:6px 0;color:#888">Rückruf</td>
-        <td style="padding:6px 0">{contact_phone}</td></tr>
-    <tr><td style="padding:6px 0;color:#888">E-Mail</td>
-        <td style="padding:6px 0">{contact_email}</td></tr>
+        <td style="padding:6px 0">{display_phone}</td></tr>
     <tr><td style="padding:6px 0;color:#888">Zeitpunkt</td>
         <td style="padding:6px 0">{now}</td></tr>
     <tr><td style="padding:6px 0;color:#888">Kategorie</td>

@@ -295,50 +295,43 @@ async def answer_question(question: str, call_sid: str = "", lat_logger=None) ->
 
 
 async def extract_contact_data(speech_result: str) -> dict:
-    """Extrahiert Telefonnummer und E-Mail aus natürlichsprachlicher (gesprochener) Eingabe via Gemini."""
+    """Extrahiert Rückruf-Telefonnummer aus natürlichsprachlicher (gesprochener) Eingabe via Gemini."""
     if not speech_result.strip():
-        return {"phone": "", "email": ""}
+        return {"phone": ""}
     try:
         llm = ChatVertexAI(
             model_name=settings.gemini_model,
             project=settings.gcp_project_id,
             location=settings.gcp_location,
             temperature=0.0,
-            max_output_tokens=150,
+            max_output_tokens=80,
         )
         prompt = (
-            "Extrahiere Telefonnummer und E-Mail-Adresse aus folgendem gesprochenen Text.\n\n"
+            "Extrahiere die Telefonnummer aus folgendem gesprochenen Text.\n\n"
             "Regeln:\n"
-            '- "at" oder "ät" → @\n'
-            '- "punkt" → .\n'
             '- "null" → 0, "eins" → 1, "zwei" → 2, usw.\n'
-            "- Leerzeichen in Telefonnummern beibehalten\n"
-            "- Nur die Werte extrahieren, nichts erfinden\n\n"
+            "- Leerzeichen zwischen Zifferngruppen beibehalten\n"
+            "- Nur die Nummer extrahieren, nichts erfinden\n\n"
             "Beispiele:\n"
-            '- "089 12345" → phone: "089 12345"\n'
-            '- "einmueller at test punkt de" → email: "einmueller@test.de"\n'
-            '- "mueller ät firma-name punkt com" → email: "mueller@firma-name.com"\n\n'
+            '- "meine Nummer ist null acht neun eins zwei drei" → "089 123"\n'
+            '- "089 12345" → "089 12345"\n\n'
             f"Text: '{speech_result}'\n\n"
             "Antworte ausschließlich als JSON, ohne Markdown, ohne Backticks:\n"
-            '{"phone": "...", "email": "..."}\n'
-            "Fehlende Werte als leeren String."
+            '{"phone": "..."}\n'
+            "Wenn keine Nummer erkennbar: leeren String."
         )
         response = await llm.ainvoke([HumanMessage(content=prompt)])
         raw = response.content.strip()
-        # Markdown-Backticks entfernen falls Gemini sie trotzdem setzt
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
         data = json.loads(raw)
-        return {
-            "phone": str(data.get("phone", "")),
-            "email": str(data.get("email", "")),
-        }
+        return {"phone": str(data.get("phone", ""))}
     except Exception as e:
         logger.warning("Kontaktdaten-Extraktion fehlgeschlagen: %s", e)
-        return {"phone": "", "email": ""}
+        return {"phone": ""}
 
 
 async def summarize_conversation(conversation_history: list[dict]) -> str:

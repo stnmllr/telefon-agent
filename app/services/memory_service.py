@@ -73,6 +73,7 @@ def save_pending_contact(
             "stage": stage,
             "anliegen": anliegen,
             "timestamp": datetime.utcnow().isoformat(),
+            # kein 'email'-Feld — nur Telefonnummer wird erfasst
         })
     except Exception as e:
         logger.error("pending_contact speichern fehlgeschlagen: %s", e)
