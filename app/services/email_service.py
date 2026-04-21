@@ -32,16 +32,20 @@ async def send_routing_email(
     conversation_history: list[dict],
     call_sid: str = "",
     caller_contact: dict | None = None,
+    recipient_override: str | None = None,
+    team_name_override: str | None = None,
 ) -> bool:
     """
     Sendet eine Benachrichtigungs-E-Mail nach Anruf-Weiterleitung.
 
     Args:
-        category:             Routing-Kategorie (erp, evs, hr, it, verwaltung)
+        category:             Routing-Kategorie (erp, evs, hr, it, verwaltung, phonebook)
         caller_number:        Twilio From-Nummer des Anrufers
         user_question:        Originale Frage des Anrufers
         conversation_history: Liste von {"role": "user"|"assistant", "content": "..."}
         call_sid:             Twilio Call-SID (für Referenz)
+        recipient_override:   Direkter Empfänger (z.B. Telefonbuch-Person)
+        team_name_override:   Anrede des Empfängers (z.B. "Müller, Stephan")
 
     Returns:
         True bei Erfolg, False bei Fehler
@@ -50,11 +54,14 @@ async def send_routing_email(
         logger.warning("SENDGRID_API_KEY nicht gesetzt — E-Mail wird nicht gesendet")
         return False
 
-    if category not in CATEGORY_EMAILS:
+    if recipient_override:
+        recipient_email = recipient_override
+        team_name = team_name_override or "Empfänger"
+    elif category not in CATEGORY_EMAILS:
         logger.warning("Unbekannte Kategorie für E-Mail: %s", category)
         return False
-
-    team_name, recipient_email = CATEGORY_EMAILS[category]
+    else:
+        team_name, recipient_email = CATEGORY_EMAILS[category]
     now = datetime.now().strftime("%d.%m.%Y %H:%M Uhr")
     contact = caller_contact or {}
     extracted_phone = contact.get("phone", "")

@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from google.cloud import firestore
 
 from app.services.rag_service import answer_question, extract_contact_data
+from app.services import phonebook_service
 from app.services.memory_service import (
     get_history,
     save_message,
@@ -123,6 +124,7 @@ def _normalize_stt_names(text: str) -> str:
 
 _PHONEBOOK_INTENT_RE = [
     re.compile(r'\bmöchte\b.{0,50}\bsprechen\b'),
+    re.compile(r'\bwürde\b.{0,50}\bsprechen\b'),
     re.compile(r'\bwill\b.{0,50}\bsprechen\b'),
     re.compile(r'\bkann ich\b.{0,50}\bsprechen\b'),
     re.compile(r'\bsuche?\b'),
@@ -177,6 +179,19 @@ def _build_retry_phone_twiml() -> str:
     <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Wie lautet Ihre Rückrufnummer?</Say>
   </Gather>
   <Redirect method="POST">/call/process_contact</Redirect>
+</Response>"""
+
+
+def _build_phonebook_anliegen_twiml(person_name: str) -> str:
+    last = person_name.split(",")[0].strip()
+    msg = f"Ich habe {last} im Verzeichnis gefunden. Was ist der Anlass Ihres Anrufs? Ich leite das gerne weiter."
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="/call/transcribe" method="POST"
+          language="de-DE" speechTimeout="7">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+  </Gather>
+  <Redirect method="POST">/call/transcribe</Redirect>
 </Response>"""
 
 
@@ -361,10 +376,29 @@ async def process(
             lat_logger.finish()
         return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
 
-    # Schritt 1: Neue Kategorie erkennen — Telefonbuch-Intent überspringt Routing
+    # Schritt 1: Telefonbuch-Intent prüfen und code-level routen
     is_phonebook = _detect_phonebook_intent(speech_result)
     if is_phonebook:
-        logger.info("[PROCESS] Telefonbuch-Intent erkannt, überspringe Support-Routing. CallSid=%s", CallSid)
+        person = phonebook_service.find_in_text(speech_result)
+        if person:
+            logger.info("[PROCESS] Telefonbuch-Match: %s | CallSid=%s", person["name"], CallSid)
+            save_message(CallSid, "user", speech_result)
+            try:
+                save_pending_contact(CallSid, "phonebook", speech_result, from_number, stage="anliegen")
+                update_pending_contact(CallSid,
+                    person_name=person["name"],
+                    person_email=person.get("email", ""))
+            except Exception as exc:
+                logger.warning("[PROCESS] save_pending_contact phonebook fehlgeschlagen: %s", exc)
+            if lat_logger:
+                lat_logger.mark("routing_phonebook")
+                lat_logger.finish()
+            return Response(content=_build_phonebook_anliegen_twiml(person["name"]),
+                            media_type="application/xml")
+        else:
+            logger.info("[PROCESS] Telefonbuch-Intent ohne Match — gehe zu RAG. CallSid=%s", CallSid)
+
+    # Schritt 2: Support-Kategorie erkennen (nur wenn kein Telefonbuch-Intent)
     category = None if is_phonebook else _detect_routing_category(speech_result)
     if category:
         word_count = len(speech_result.split())
@@ -503,6 +537,8 @@ async def process_contact(
         conversation_history=history,
         call_sid=CallSid,
         caller_contact=caller_contact,
+        recipient_override=pending.get("person_email") or None,
+        team_name_override=pending.get("person_name") or None,
     )
 
     # G) Bestätigung + Verabschiedung (kategoriespezifisch)
@@ -512,6 +548,7 @@ async def process_contact(
         "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
         "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
         "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
+        "phonebook":  "Vielen Dank. Ihr Anliegen wird direkt weitergeleitet. Auf Wiederhören.",
     }
     farewell_msg = _FAREWELL_BY_CATEGORY.get(category, "Vielen Dank. Ihre Anfrage wurde weitergeleitet. Auf Wiederhören.")
     save_message(CallSid, "assistant", farewell_msg)
