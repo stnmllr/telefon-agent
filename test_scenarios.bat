@@ -70,7 +70,7 @@ echo.
 echo ========================================
 echo SZENARIO 11: ERP-Frage - Artikel anlegen
 echo ========================================
-curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Wie lege ich einen neuen Artikel an?" -d "Confidence=0.9" -d "CallSid=test-s11"
+curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Welche Felder muss ich beim Anlegen eines neuen Stammdatensatzes befüllen?" -d "Confidence=0.9" -d "CallSid=test-s11"
 echo.
 echo ========================================
 echo SZENARIO 12: Einkauf - Bedarfsermittlung
@@ -80,7 +80,7 @@ echo.
 echo ========================================
 echo SZENARIO 13: Schnittstelle ERP zu FIBU
 echo ========================================
-curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Wie wird ein Auftrag an die FIBU übergeben?" -d "Confidence=0.9" -d "CallSid=test-s13"
+curl -s -X POST %BASE_URL%/call/process -d "SpeechResult=Wie funktioniert die Übergabe von Belegen an die Finanzbuchhaltung?" -d "Confidence=0.9" -d "CallSid=test-s13"
 echo.
 echo ========================================
 echo ALLE TESTS ABGESCHLOSSEN
