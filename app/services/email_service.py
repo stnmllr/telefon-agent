@@ -105,8 +105,8 @@ KI-Telefon-Agent — SOPRA System GmbH
 <html><body style="font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto">
 
 <div style="background:#003366;color:white;padding:16px 24px;border-radius:6px 6px 0 0">
-  <h2 style="margin:0;font-size:18px">KI-Telefon-Agent — Anruf-Weiterleitung</h2>
-  <p style="margin:4px 0 0;font-size:13px;opacity:0.8">SOPRA System GmbH</p>
+  <h2 style="margin:0;font-size:18px">Sofia – Anruf-Weiterleitung</h2>
+  <p style="margin:4px 0 0;font-size:13px;opacity:0.8">Digitaler Assistent von Stephan Müller</p>
 </div>
 
 <div style="border:1px solid #ddd;border-top:none;padding:20px 24px;border-radius:0 0 6px 6px">

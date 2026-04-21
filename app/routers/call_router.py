@@ -37,9 +37,10 @@ router = APIRouter(prefix="/call")
 _ERP_KEYWORDS = {"erp", "warenwirtschaft", "auftrag", "lieferschein", "artikel",
                   "kulimi", "kundenverwaltung", "produktion", "inventur", "lager"}
 _EVS_KEYWORDS = {"evs", "zeiterfassung"}
+_IT_KEYWORDS = {"computer", "pc", "laptop", "netzwerk", "drucker", "internet",
+                 "it-support", "software", "login", "passwort", "bildschirm",
+                 "server", "vpn", "zugang", "startet nicht"}
 _HR_KEYWORDS = {"hr", "personal", "urlaub", "gehalt", "arbeitsvertrag", "krankmeldung"}
-_IT_KEYWORDS = {"computer", "netzwerk", "drucker", "internet", "it-support",
-                 "software", "login", "passwort", "bildschirm", "laptop", "server"}
 _VERWALTUNG_KEYWORDS = {"vertrag", "rechnung", "preis", "angebot", "wartung",
                          "lizenz", "abrechnung", "verwaltung"}
 
@@ -50,10 +51,10 @@ def _detect_routing_category(text: str) -> str | None:
         return "erp"
     if any(kw in lower for kw in _EVS_KEYWORDS):
         return "evs"
-    if any(kw in lower for kw in _HR_KEYWORDS):
-        return "hr"
     if any(kw in lower for kw in _IT_KEYWORDS):
         return "it"
+    if any(kw in lower for kw in _HR_KEYWORDS):
+        return "hr"
     if any(kw in lower for kw in _VERWALTUNG_KEYWORDS):
         return "verwaltung"
     return None
