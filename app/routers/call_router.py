@@ -15,6 +15,7 @@ from google.cloud import firestore
 from app.services.rag_service import answer_question, extract_contact_data
 from app.services.memory_service import (
     get_history,
+    save_message,
     save_pending_contact,
     get_pending_contact,
     update_pending_contact,
@@ -292,6 +293,7 @@ async def process(
     if pending and pending.get("stage") == "anliegen":
         # Schritt 2: Anliegen erhalten → Kontaktdaten anbieten
         logger.info("[PROCESS] Stage=anliegen, speichere Anliegen und biete Kontaktdaten an. CallSid=%s", CallSid)
+        save_message(CallSid, "user", speech_result)
         try:
             update_pending_contact(CallSid, anliegen=speech_result, stage="kontakt")
         except Exception as exc:
@@ -305,6 +307,8 @@ async def process(
     category = _detect_routing_category(speech_result)
     if category:
         logger.info("[PROCESS] Kategorie erkannt: %s — frage Anliegen ab. CallSid=%s", category, CallSid)
+        label = _CATEGORY_LABELS.get(category, "Ihr Anliegen")
+        save_message(CallSid, "assistant", f"Ich verstehe, es geht um {label}. Können Sie mir Ihr Anliegen kurz schildern?")
         try:
             save_pending_contact(CallSid, category, speech_result, from_number, stage="anliegen")
         except Exception as exc:
@@ -392,6 +396,7 @@ async def process_contact(
     # C) Kontaktdaten per Gemini extrahieren (Schritt 3a)
     caller_contact = await extract_contact_data(SpeechResult)
     logger.info("[PROCESS_CONTACT] Extrahiert: %s", caller_contact)
+    save_message(CallSid, "user", SpeechResult)
 
     # D) E-Mail senden — Anliegen aus pending, Kontaktdaten aus Gemini-Extraktion
     anliegen = pending.get("anliegen") or pending.get("speech_result", "")
@@ -414,6 +419,7 @@ async def process_contact(
         "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
     }
     farewell_msg = _FAREWELL_BY_CATEGORY.get(category, "Vielen Dank. Ihre Anfrage wurde weitergeleitet. Auf Wiederhören.")
+    save_message(CallSid, "assistant", farewell_msg)
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say language="de-DE" voice="Google.de-DE-Neural2-F">{farewell_msg}</Say>
