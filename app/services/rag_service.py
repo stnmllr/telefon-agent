@@ -359,9 +359,13 @@ async def summarize_conversation(conversation_history: list[dict]) -> str:
             if m.get("content", "").strip()
         )
         prompt = (
-            "Fasse das folgende Telefongespräch in 2-3 Sätzen auf Deutsch zusammen.\n"
-            "Format: Wer hat angerufen (falls bekannt), was war das Anliegen, was wurde besprochen.\n"
+            "Du fasst einen Kundenanruf in 2-3 Sätzen zusammen. "
+            "Fokus: Was wollte der Kunde? Was ist sein konkretes Problem oder Anliegen? "
+            "Schreibe aus Perspektive des Anrufers, nicht des Agenten. "
+            "Keine Erwähnung von Durchwahlen oder internen Abläufen. "
             "Keine Aufzählungen, nur fließende Sprache.\n\n"
+            "Beispiel: \"Herr Müller hat angerufen wegen einer Preiserhöhung auf seiner Rechnung. "
+            "Laut Vertrag wurde eine 5-jährige Preisgarantie vereinbart, die noch nicht abgelaufen ist.\"\n\n"
             f"Gesprächsverlauf:\n{turns}"
         )
         response = await llm.ainvoke([HumanMessage(content=prompt)])

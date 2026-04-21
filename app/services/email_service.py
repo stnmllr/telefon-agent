@@ -86,10 +86,6 @@ Zeitpunkt:  {now}
 Kategorie:  {category_label}
 Call-SID:   {call_sid or '—'}
 
-ANLIEGEN DES ANRUFERS:
-{user_question}
-
-─────────────────────────────────────────
 GESPRÄCHSZUSAMMENFASSUNG
 ─────────────────────────────────────────
 {summary}
@@ -125,11 +121,6 @@ KI-Telefon-Agent — SOPRA System GmbH
     <tr><td style="padding:6px 0;color:#888">Call-SID</td>
         <td style="padding:6px 0;font-size:12px;color:#999">{call_sid or '—'}</td></tr>
   </table>
-
-  <div style="background:#f5f5f5;border-left:4px solid #003366;padding:12px 16px;margin-bottom:20px;border-radius:0 4px 4px 0">
-    <p style="margin:0;font-size:13px;color:#888">Anliegen des Anrufers:</p>
-    <p style="margin:6px 0 0;font-size:15px">{user_question}</p>
-  </div>
 
   <h3 style="font-size:14px;color:#555;margin-bottom:8px">Gesprächszusammenfassung</h3>
   <p style="font-size:14px;line-height:1.6;background:#f9f9f9;padding:12px 16px;border-radius:4px;border:1px solid #eee">{summary}</p>
