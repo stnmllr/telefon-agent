@@ -88,6 +88,7 @@ _CATEGORY_EXTENSIONS = {
     "hr":         ("HR-Support",   "eins eins sechs"),
     "it":         ("IT-Support",   "eins eins fünf"),
     "verwaltung": ("Verwaltung",   "zwei sechs"),
+    "nachricht":  ("Stephan Müller", "zwei sechs"),
 }
 
 _REFUSAL_KEYWORDS = {
@@ -141,12 +142,28 @@ def _detect_phonebook_intent(text: str) -> bool:
     return any(pat.search(lower) for pat in _PHONEBOOK_INTENT_RE)
 
 
+_NACHRICHT_INTENT_RE = [
+    re.compile(r'\bnachricht\b'),
+    re.compile(r'\bhinterlassen\b'),
+    re.compile(r'\bausrichten\b'),
+    re.compile(r'\bweitergeben\b'),
+    re.compile(r'\bweitergeleitet\b'),
+    re.compile(r'\bbescheid\b'),
+]
+
+
+def _detect_nachricht_intent(text: str) -> bool:
+    lower = text.lower()
+    return any(pat.search(lower) for pat in _NACHRICHT_INTENT_RE)
+
+
 _ANLIEGEN_PROMPTS = {
     "erp":        "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr ERP-Problem.",
     "evs":        "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr EVS-Problem.",
     "hr":         "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.",
     "it":         "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr IT-Problem.",
     "verwaltung": "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.",
+    "nachricht":  "Was soll ich Herrn Müller ausrichten? Bitte schildern Sie kurz Ihr Anliegen.",
 }
 
 
@@ -389,7 +406,22 @@ async def process(
             lat_logger.finish()
         return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
 
-    # Schritt 1: Telefonbuch-Intent prüfen und code-level routen
+    # Schritt 1a: "Nachricht hinterlassen"-Intent → Verwaltungs-Routing
+    if _detect_nachricht_intent(speech_result):
+        logger.info("[PROCESS] Nachricht-Intent erkannt. CallSid=%s", CallSid)
+        save_message(CallSid, "user", speech_result)
+        prompt_text = _ANLIEGEN_PROMPTS["nachricht"]
+        save_message(CallSid, "assistant", prompt_text)
+        try:
+            save_pending_contact(CallSid, "nachricht", speech_result, from_number, stage="anliegen")
+        except Exception as exc:
+            logger.warning("[PROCESS] save_pending_contact nachricht fehlgeschlagen: %s", exc)
+        if lat_logger:
+            lat_logger.mark("routing_nachricht")
+            lat_logger.finish()
+        return Response(content=_build_anliegen_request_twiml("nachricht"), media_type="application/xml")
+
+    # Schritt 1b: Telefonbuch-Intent prüfen und code-level routen
     is_phonebook = _detect_phonebook_intent(speech_result)
     if is_phonebook:
         person = phonebook_service.find_in_text(speech_result)
@@ -562,6 +594,7 @@ async def process_contact(
         "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
         "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
         "phonebook":  "Vielen Dank. Ihr Anliegen wird direkt weitergeleitet. Auf Wiederhören.",
+        "nachricht":  "Vielen Dank. Ihre Nachricht wurde notiert und wird an Herrn Müller weitergeleitet. Auf Wiederhören.",
     }
     farewell_msg = _FAREWELL_BY_CATEGORY.get(category, "Vielen Dank. Ihre Anfrage wurde weitergeleitet. Auf Wiederhören.")
     save_message(CallSid, "assistant", farewell_msg)

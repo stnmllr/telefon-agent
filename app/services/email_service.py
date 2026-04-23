@@ -22,6 +22,7 @@ CATEGORY_EMAILS = {
     "hr":         ("HR-Support",    "hr-support@sopra-system.com"),
     "it":         ("IT-Support",    "it-support@sopra-system.com"),
     "verwaltung": ("Verwaltung",    "Stephan.Mueller@sopra-system.com"),
+    "nachricht":  ("Stephan Müller", "Stephan.Mueller@sopra-system.com"),
 }
 
 
