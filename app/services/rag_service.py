@@ -10,6 +10,7 @@ from langchain.schema import HumanMessage, SystemMessage, AIMessage
 from app.config import settings
 from app.services.memory_service import get_history, save_message
 from app.services import phonebook_service
+from app.services.absence_service import get_active_absence, build_sofia_text
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ GESPRÄCHSFÜHRUNG:
 - Beende NIEMALS das Gespräch von dir aus.
 - Frage IMMER am Ende: "Haben Sie noch eine weitere Frage?"
 - Verabschiede dich NUR wenn der User explizit sagt: "Nein danke", "Tschüss", "Auf Wiederhören".
+- Wenn der Anrufer signalisiert, dass er nichts mehr benötigt (z.B. "Nein danke", "Das war alles", "Tschüss"), verabschiede dich freundlich und beende das Gespräch mit einer Formulierung wie: "Vielen Dank für Ihren Anruf. Ich wünsche Ihnen noch einen schönen Tag. Auf Wiederhören!"
 
 WICHTIG:
 - Wenn die Antwort NICHT im Kontext steht: "Dazu habe ich leider keine Information. Soll ich einen Kollegen für Sie hinzuziehen?"
@@ -283,6 +285,14 @@ async def answer_question(question: str, call_sid: str = "", lat_logger=None) ->
 
         history = get_history(call_sid)
         save_message(call_sid, "user", question)
+
+        # Abwesenheitscheck — nur beim ersten Turn
+        absence_prefix = ""
+        if not history:
+            absence = await get_active_absence()
+            if absence:
+                absence_prefix = build_sofia_text(absence) + " "
+
         search_query = _build_search_query(question, history)
         if lat_logger:
             lat_logger.mark("rag_start")
@@ -326,7 +336,7 @@ async def answer_question(question: str, call_sid: str = "", lat_logger=None) ->
 
         save_message(call_sid, "assistant", answer)
         logger.info("RAG-Antwort | CallSid=%s | Antwort='%s'", call_sid, answer[:150])
-        return answer
+        return absence_prefix + answer
 
     except Exception as e:
         logger.error("Fehler in RAG-Pipeline | CallSid=%s | Fehler=%s", call_sid, e)

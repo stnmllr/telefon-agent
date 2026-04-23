@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from google.cloud import firestore
 
 from app.services.rag_service import answer_question, extract_contact_data
+from app.services.absence_service import get_active_absence, build_sofia_text
 from app.services import phonebook_service
 from app.services.memory_service import (
     get_history,
@@ -221,11 +222,22 @@ async def incoming_call():
 
     logger.info("[INCOMING] Neuer Anruf gestartet.")
 
-    twiml = build_welcome_twiml(
-        message=(
+    absence = await get_active_absence()
+    if absence:
+        absence_text = build_sofia_text(absence)
+        message = (
+            f"Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller. "
+            f"{absence_text} Kann ich Ihnen trotzdem helfen oder eine Nachricht entgegennehmen?"
+        )
+        logger.info("[INCOMING] Abwesenheit aktiv: %s", absence.get("type"))
+    else:
+        message = (
             "Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller. "
             "Was kann ich für Sie tun?"
-        ),
+        )
+
+    twiml = build_welcome_twiml(
+        message=message,
         transcribe_url="/call/transcribe",
     )
 
