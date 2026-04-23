@@ -191,14 +191,14 @@ Budget-Alert: €10/Monat eingerichtet ✅ → auf €15 erhöhen (2. Datastore)
 
 ## NÄCHSTE SESSION — Offene Punkte (Reihenfolge)
 
-### 1. DNS-Records für ki-agent@sopra-system.com ← WARTET AUF PATRICK
-Patrick Münchhoff, DW 82 — 4 CNAME/TXT Records in SendGrid Dashboard.
-Nach DNS-Setup: `EMAIL_FROM` in Cloud Run auf `ki-agent@sopra-system.com` ändern.
+### 1. Handy App
+Die Handy‑App ist eine kleine Web‑App (PWA), mit der du deine Abwesenheit (z. B. Urlaub oder Krankheit) direkt am iPhone einträgst.
+Diese Info nutzt Sofia, um Anrufer automatisch korrekt zu informieren oder Anrufe an eine Vertretung weiterzuleiten.
 
 ### 2. Budget-Alert auf €15 erhöhen
 Zweiter Datastore aktiv — Alert anpassen.
 
-### 3. Outlook-Kalender Integration ← WARTET AUF PATRICK
+### 3. Outlook-Kalender Integration ← kommt vermutlich nicht
 Azure App Registration mit Calendars.Read benötigt.
 
 ### 4. Qualität
@@ -210,6 +210,7 @@ Azure App Registration mit Calendars.Read benötigt.
 
 ### 5. eval_agent.py
 Automatisierter Test-Loop — sinnvoll sobald Basis-Flow stabil.
+
 
 ## Wichtige Architektur-Entscheidungen
 

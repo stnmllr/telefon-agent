@@ -1,15 +1,15 @@
 # ============================================================
-# agent-service / app/main.py
-# FastAPI entrypoint – empfängt Twilio-Webhooks,
-# orchestriert STT → RAG → LLM → TTS Pipeline
+# agent-service / app/main.py  (aktualisiert)
+# FastAPI entrypoint – Twilio-Webhooks + PWA App Router
 # ============================================================
 
 import logging
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from contextlib import asynccontextmanager
 
 from app.routers import call_router
+from app.routers import app_router          # NEU
 from app.config import settings
 
 logging.basicConfig(
@@ -28,13 +28,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="KI-Telefon-Agent",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
 app.include_router(call_router.router, tags=["Telephonie"])
+app.include_router(app_router.router, tags=["PWA"])      # NEU
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0"}

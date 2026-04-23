@@ -1,0 +1,17 @@
+{
+  "name": "Sofia – Abwesenheit",
+  "short_name": "Sofia",
+  "description": "Abwesenheits-Verwaltung für Sofia KI-Telefon-Agent",
+  "start_url": "/app/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%236366f1'/><text y='145' x='30' font-size='130'>📵</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

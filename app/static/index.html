@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sofia" />
+  <link rel="manifest" href="/app/manifest.json" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f46e5'/><text y='.9em' font-size='75' x='12'>📵</text></svg>" />
+  <title>Sofia – Abwesenheit</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f172a;
+      --surface:  #1e293b;
+      --border:   #334155;
+      --accent:   #6366f1;
+      --accent2:  #818cf8;
+      --text:     #f1f5f9;
+      --muted:    #94a3b8;
+      --danger:   #ef4444;
+      --success:  #22c55e;
+      --radius:   14px;
+      --safe-top: env(safe-area-inset-top, 0px);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      padding-top: calc(var(--safe-top) + 16px);
+      padding-bottom: 40px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px 20px;
+    }
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo { font-size: 26px; }
+    .header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+    .header-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+    .btn-logout {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .btn-logout:active { opacity: 0.7; }
+
+    /* ── Login Screen ── */
+    #login-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 80dvh;
+      gap: 24px;
+      padding: 20px;
+    }
+    .login-logo { font-size: 64px; }
+    .login-title { font-size: 24px; font-weight: 700; text-align: center; }
+    .login-sub { color: var(--muted); font-size: 14px; text-align: center; }
+    .btn-google {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: white;
+      color: #1f2937;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .btn-google:active { opacity: 0.85; }
+    .google-icon { width: 20px; height: 20px; }
+
+    /* ── Main ── */
+    #main-screen { padding: 0 16px; }
+
+    /* ── Add Form ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 14px;
+    }
+
+    .type-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .type-btn {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 10px 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .type-btn .type-emoji { font-size: 20px; }
+    .type-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    .field input, .field textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .field input:focus, .field textarea:focus {
+      border-color: var(--accent);
+    }
+    .field textarea { resize: none; height: 60px; }
+
+    /* Datumsfelder nebeneinander */
+    .date-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn-add {
+      width: 100%;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    .btn-add:active { opacity: 0.85; }
+    .btn-add:disabled { opacity: 0.5; cursor: default; }
+
+    /* ── Abwesenheiten Liste ── */
+    .absence-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .absence-item.active-now {
+      border-color: var(--accent);
+      background: rgba(99,102,241,0.08);
+    }
+    .absence-emoji { font-size: 28px; flex-shrink: 0; }
+    .absence-info { flex: 1; min-width: 0; }
+    .absence-type {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-active {
+      background: var(--accent);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .absence-dates { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .absence-note { font-size: 12px; color: var(--muted); margin-top: 4px; font-style: italic; }
+    .absence-sofia {
+      font-size: 11px;
+      color: var(--accent2);
+      margin-top: 5px;
+      line-height: 1.4;
+    }
+
+    .btn-delete {
+      background: none;
+      border: none;
+      color: var(--danger);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 4px;
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+    .btn-delete:active { opacity: 1; }
+
+    .empty-state {
+      text-align: center;
+      color: var(--muted);
+      padding: 40px 20px;
+      font-size: 14px;
+    }
+    .empty-emoji { font-size: 40px; margin-bottom: 10px; }
+
+    .toast {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--success);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="login-screen" hidden>
+  <div class="login-logo">📵</div>
+  <div>
+    <div class="login-title">Sofia</div>
+    <div class="login-sub">Abwesenheits-Verwaltung</div>
+  </div>
+  <a href="/app/auth/login" class="btn-google">
+    <svg class="google-icon" viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </svg>
+    Mit Google anmelden
+  </a>
+</div>
+
+<!-- Main App -->
+<div id="main-screen" hidden>
+
+  <div class="header">
+    <div class="header-title">
+      <span class="logo">📵</span>
+      <div>
+        <h1>Sofia</h1>
+        <div class="header-sub">Abwesenheits-Verwaltung</div>
+      </div>
+    </div>
+    <button class="btn-logout" onclick="logout()">Logout</button>
+  </div>
+
+  <!-- Neue Abwesenheit -->
+  <div class="card">
+    <div class="card-title">Neue Abwesenheit</div>
+
+    <div class="type-grid">
+      <button class="type-btn" data-type="urlaub" onclick="selectType('urlaub')">
+        <span class="type-emoji">🏖️</span>Urlaub
+      </button>
+      <button class="type-btn" data-type="meeting" onclick="selectType('meeting')">
+        <span class="type-emoji">💼</span>Meeting
+      </button>
+      <button class="type-btn" data-type="abwesend" onclick="selectType('abwesend')">
+        <span class="type-emoji">🚪</span>Abwesend
+      </button>
+      <button class="type-btn" data-type="dienstreise" onclick="selectType('dienstreise')">
+        <span class="type-emoji">✈️</span>Dienstreise
+      </button>
+    </div>
+
+    <div class="date-row">
+      <div class="field">
+        <label id="start-label">Von</label>
+        <input type="datetime-local" id="start" />
+      </div>
+      <div class="field">
+        <label id="end-label">Bis (Uhrzeit)</label>
+        <input type="datetime-local" id="end" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Notiz (optional)</label>
+      <textarea id="note" placeholder="z.B. Erreichbar per E-Mail"></textarea>
+    </div>
+
+    <button class="btn-add" id="btn-add" onclick="addAbsence()">Eintragen</button>
+  </div>
+
+  <!-- Liste -->
+  <div class="card">
+    <div class="card-title">Eingetragene Abwesenheiten</div>
+    <div id="absence-list"><div class="empty-state"><div class="empty-emoji">✅</div>Keine Abwesenheiten eingetragen</div></div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TYPE_CONFIG = {
+  urlaub:      { emoji: "🏖️", label: "Urlaub",      endLabel: "Bis (Datum)",   dateOnly: true  },
+  meeting:     { emoji: "💼", label: "Meeting",     endLabel: "Bis (Uhrzeit)", dateOnly: false },
+  abwesend:    { emoji: "🚪", label: "Abwesend",    endLabel: "Bis (Datum)",   dateOnly: true  },
+  dienstreise: { emoji: "✈️", label: "Dienstreise", endLabel: "Bis (Datum)",   dateOnly: true  },
+};
+
+let selectedType = null;
+
+// ── Init ──────────────────────────────────────────────────────
+async function init() {
+  try {
+    const resp = await fetch("/app/auth/me");
+    if (resp.ok) {
+      document.getElementById("main-screen").removeAttribute("hidden");
+      await loadAbsences();
+      setDefaultDates();
+    } else {
+      document.getElementById("login-screen").removeAttribute("hidden");
+    }
+  } catch {
+    document.getElementById("login-screen").removeAttribute("hidden");
+  }
+}
+
+function setDefaultDates() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const local = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  document.getElementById("start").value = local(now);
+  const end = new Date(now.getTime() + 60 * 60 * 1000);
+  document.getElementById("end").value = local(end);
+}
+
+// ── Typ auswählen ─────────────────────────────────────────────
+function selectType(type) {
+  selectedType = type;
+  document.querySelectorAll(".type-btn").forEach(b => b.classList.remove("active"));
+  document.querySelector(`[data-type="${type}"]`).classList.add("active");
+
+  const cfg = TYPE_CONFIG[type];
+  document.getElementById("end-label").textContent = cfg.endLabel;
+
+  const endInput = document.getElementById("end");
+  const startInput = document.getElementById("start");
+  if (cfg.dateOnly) {
+    endInput.type = "date";
+    startInput.type = "date";
+    document.getElementById("start-label").textContent = "Von (Datum)";
+    // Datum-Defaults
+    const today = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const dateStr = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    startInput.value = dateStr(today);
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate()+1);
+    endInput.value = dateStr(tomorrow);
+  } else {
+    endInput.type = "datetime-local";
+    startInput.type = "datetime-local";
+    document.getElementById("start-label").textContent = "Von";
+    setDefaultDates();
+  }
+}
+
+// ── Abwesenheit speichern ────────────────────────────────────
+async function addAbsence() {
+  if (!selectedType) { showToast("❗ Bitte Typ auswählen", false); return; }
+  const start = document.getElementById("start").value;
+  const end   = document.getElementById("end").value;
+  const note  = document.getElementById("note").value.trim();
+
+  if (!start || !end) { showToast("❗ Datum/Zeit fehlt", false); return; }
+  if (end < start)    { showToast("❗ Ende vor Beginn", false); return; }
+
+  const btn = document.getElementById("btn-add");
+  btn.disabled = true;
+  btn.textContent = "Wird gespeichert…";
+
+  try {
+    const resp = await fetch("/app/absence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: selectedType, start, end, note }),
+    });
+    if (!resp.ok) throw new Error();
+    showToast("✅ Gespeichert");
+    document.getElementById("note").value = "";
+    await loadAbsences();
+  } catch {
+    showToast("❌ Fehler beim Speichern", false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Eintragen";
+  }
+}
+
+// ── Liste laden ───────────────────────────────────────────────
+async function loadAbsences() {
+  try {
+    const resp = await fetch("/app/absence");
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderList(data.absences || []);
+  } catch {}
+}
+
+function renderList(absences) {
+  const container = document.getElementById("absence-list");
+  if (!absences.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-emoji">✅</div>Keine Abwesenheiten eingetragen</div>`;
+    return;
+  }
+
+  const now = new Date().toISOString();
+  container.innerHTML = absences.map(a => {
+    const cfg = TYPE_CONFIG[a.type] || { emoji: "📅", label: a.type };
+    const isActive = a.start <= now && now <= a.end + "Z";
+    const startFmt = formatDT(a.start);
+    const endFmt   = formatDT(a.end);
+    const sofiaText = buildSofiaText(a);
+
+    return `
+      <div class="absence-item ${isActive ? "active-now" : ""}">
+        <div class="absence-emoji">${cfg.emoji}</div>
+        <div class="absence-info">
+          <div class="absence-type">
+            ${cfg.label}
+            ${isActive ? '<span class="badge-active">Aktiv</span>' : ""}
+          </div>
+          <div class="absence-dates">${startFmt} → ${endFmt}</div>
+          ${a.note ? `<div class="absence-note">${a.note}</div>` : ""}
+          <div class="absence-sofia">💬 „${sofiaText}"</div>
+        </div>
+        <button class="btn-delete" onclick="deleteAbsence('${a.id}')" title="Löschen">🗑️</button>
+      </div>`;
+  }).join("");
+}
+
+function formatDT(iso) {
+  if (!iso) return "—";
+  try {
+    if (iso.includes("T")) {
+      const d = new Date(iso);
+      return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })
+           + " " + d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr";
+    } else {
+      const [y, m, d] = iso.split("-");
+      return `${d}.${m}.${y}`;
+    }
+  } catch { return iso; }
+}
+
+function buildSofiaText(a) {
+  const phrases = { urlaub: "im Urlaub", meeting: "im Meeting", abwesend: "derzeit abwesend", dienstreise: "auf Dienstreise" };
+  const phrase = phrases[a.type] || "abwesend";
+  const end = a.end || "";
+  if (a.type === "meeting") {
+    const time = end.includes("T") ? end.split("T")[1].substring(0,5) : end;
+    return `Herr Müller ist gerade ${phrase} und ab ${time} Uhr wieder erreichbar.`;
+  } else {
+    const date = end.split("T")[0];
+    const [y,m,d] = date.split("-");
+    const months = ["","Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+    return `Herr Müller ist ${phrase} und ab ${parseInt(d)}. ${months[parseInt(m)]} ${y} wieder erreichbar.`;
+  }
+}
+
+// ── Löschen ───────────────────────────────────────────────────
+async function deleteAbsence(id) {
+  if (!confirm("Abwesenheit löschen?")) return;
+  try {
+    const resp = await fetch(`/app/absence/${id}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error();
+    showToast("🗑️ Gelöscht");
+    await loadAbsences();
+  } catch {
+    showToast("❌ Fehler beim Löschen", false);
+  }
+}
+
+function logout() {
+  window.location.href = "/app/auth/logout";
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+// ── PWA Service Worker ────────────────────────────────────────
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/app/sw.js").catch(() => {});
+}
+
+init();
+</script>
+</body>
+</html>
