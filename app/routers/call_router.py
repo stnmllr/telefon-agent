@@ -128,6 +128,7 @@ _PHONEBOOK_INTENT_RE = [
     re.compile(r'\bwürde\b.{0,50}\bsprechen\b'),
     re.compile(r'\bwill\b.{0,50}\bsprechen\b'),
     re.compile(r'\bkann ich\b.{0,50}\bsprechen\b'),
+    re.compile(r'\bsprechen\b'),  # deckt "Müller sprechen" ohne Modalverb ab
     re.compile(r'\bsuche?\b'),
     re.compile(r'\bverbinden\b'),
     re.compile(r'\bdurchwahl\b'),
