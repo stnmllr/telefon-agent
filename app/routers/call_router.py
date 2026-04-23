@@ -244,14 +244,15 @@ async def incoming_call():
     if absence:
         absence_text = build_sofia_text(absence)
         message = (
-            f"Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller. "
+            f"Hallo, mein Name ist Sofia, ich bin der KI-Assistent von Stephan Müller. "
+            f"Ich kann Ihr Anliegen aufnehmen und weiterleiten. "
             f"{absence_text} Kann ich Ihnen trotzdem helfen oder eine Nachricht entgegennehmen?"
         )
         logger.info("[INCOMING] Abwesenheit aktiv: %s", absence.get("type"))
     else:
         message = (
-            "Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller. "
-            "Was kann ich für Sie tun?"
+            "Hallo, mein Name ist Sofia, ich bin der KI-Assistent von Stephan Müller. "
+            "Ich kann Ihr Anliegen aufnehmen und weiterleiten. Wie kann ich Ihnen helfen?"
         )
 
     twiml = build_welcome_twiml(
