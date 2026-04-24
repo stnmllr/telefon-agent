@@ -25,9 +25,9 @@ def build_phonebook_answer_twiml(name: str, durchwahl: str, transcribe_url: str)
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
-    <Say language="de-DE" voice="Google.de-DE-Journey-F">{text}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{text}</Say>
   </Gather>
-  <Say language="de-DE" voice="Google.de-DE-Journey-F">
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">
     Vielen Dank für Ihren Anruf. Auf Wiederhören.
   </Say>
 </Response>"""
@@ -44,9 +44,9 @@ def build_welcome_twiml(message: str, transcribe_url: str) -> str:
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
-    <Say language="de-DE" voice="Google.de-DE-Journey-F">{message}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{message}</Say>
   </Gather>
-  <Say language="de-DE" voice="Google.de-DE-Journey-F">
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">
     Ich habe leider keine Eingabe erhalten. Auf Wiederhören.
   </Say>
 </Response>"""
@@ -70,9 +70,9 @@ def build_answer_twiml(answer: str, transcribe_url: str) -> str:
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
-    <Say language="de-DE" voice="Google.de-DE-Journey-F">{answer_escaped}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{answer_escaped}</Say>
   </Gather>
-  <Say language="de-DE" voice="Google.de-DE-Journey-F">
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">
     Vielen Dank für Ihren Anruf. Auf Wiederhören.
   </Say>
 </Response>"""
@@ -81,7 +81,7 @@ def build_answer_twiml(answer: str, transcribe_url: str) -> str:
 def build_farewell_twiml() -> str:
     return """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="de-DE" voice="Google.de-DE-Journey-F">
+  <Say language="de-DE" voice="Google.de-DE-Neural2-F">
     Gerne. Auf Wiederhören!
   </Say>
   <Hangup/>
@@ -99,6 +99,6 @@ def build_fallback_twiml(message: str, transcribe_url: str) -> str:
           speechModel="phone_call"
           enhanced="true"
           actionOnEmptyResult="true">
-    <Say language="de-DE" voice="Google.de-DE-Journey-F">{message}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{message}</Say>
   </Gather>
 </Response>"""
