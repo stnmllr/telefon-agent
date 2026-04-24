@@ -6,10 +6,12 @@
 import logging
 import os
 import secrets
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from google.cloud import firestore as _firestore
 from pydantic import BaseModel
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 
@@ -34,24 +36,31 @@ GOOGLE_AUTH_URL      = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL  = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-# Einfacher In-Memory Session Store (reicht für Single-User)
-# Key: session_token, Value: email
-_sessions: dict[str, str] = {}
-# OAuth State Store
-_oauth_states: dict[str, str] = {}
+_STATE_TTL_SECONDS   = 600   # OAuth state: 10 Minuten
+_SESSION_TTL_DAYS    = 7     # Session-Cookie: 7 Tage
+
+_db = _firestore.AsyncClient()
 
 
 # ── Auth Helpers ─────────────────────────────────────────────
 
-def _get_session_email(request: Request) -> Optional[str]:
+async def _get_session_email(request: Request) -> Optional[str]:
     token = request.cookies.get("sofia_session")
     if not token:
         return None
-    return _sessions.get(token)
+    doc = await _db.collection("sessions").document(token).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    expires_at = datetime.fromisoformat(data["expires_at"])
+    if datetime.now(timezone.utc) > expires_at:
+        await _db.collection("sessions").document(token).delete()
+        return None
+    return data.get("email")
 
 
-def require_auth(request: Request) -> str:
-    email = _get_session_email(request)
+async def require_auth(request: Request) -> str:
+    email = await _get_session_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Nicht eingeloggt")
     return email
@@ -63,7 +72,9 @@ def require_auth(request: Request) -> str:
 async def auth_login(request: Request):
     """Startet den Google OAuth Flow."""
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = "pending"
+    await _db.collection("oauth_states").document(state).set({
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
     client = AsyncOAuth2Client(
         client_id=GOOGLE_CLIENT_ID,
@@ -77,9 +88,15 @@ async def auth_login(request: Request):
 @router.get("/auth/callback")
 async def auth_callback(request: Request, code: str, state: str):
     """Google OAuth Callback — tauscht Code gegen Token."""
-    if state not in _oauth_states:
+    state_ref = _db.collection("oauth_states").document(state)
+    state_doc = await state_ref.get()
+    if not state_doc.exists:
         raise HTTPException(status_code=400, detail="Ungültiger State")
-    del _oauth_states[state]
+    created_at = datetime.fromisoformat(state_doc.to_dict()["created_at"])
+    if (datetime.now(timezone.utc) - created_at).total_seconds() > _STATE_TTL_SECONDS:
+        await state_ref.delete()
+        raise HTTPException(status_code=400, detail="Ungültiger State")
+    await state_ref.delete()
 
     client = AsyncOAuth2Client(
         client_id=GOOGLE_CLIENT_ID,
@@ -96,7 +113,11 @@ async def auth_callback(request: Request, code: str, state: str):
         raise HTTPException(status_code=403, detail="Zugriff verweigert")
 
     session_token = secrets.token_urlsafe(32)
-    _sessions[session_token] = email
+    expires_at = datetime.now(timezone.utc) + timedelta(days=_SESSION_TTL_DAYS)
+    await _db.collection("sessions").document(session_token).set({
+        "email": email,
+        "expires_at": expires_at.isoformat(),
+    })
     logger.info("Login erfolgreich: %s", email)
 
     response = RedirectResponse(url="/app/")
@@ -106,7 +127,7 @@ async def auth_callback(request: Request, code: str, state: str):
         httponly=True,
         secure=True,
         samesite="lax",
-        max_age=86400 * 7,  # 7 Tage
+        max_age=86400 * _SESSION_TTL_DAYS,
     )
     return response
 
@@ -114,8 +135,8 @@ async def auth_callback(request: Request, code: str, state: str):
 @router.get("/auth/logout")
 async def auth_logout(request: Request):
     token = request.cookies.get("sofia_session")
-    if token and token in _sessions:
-        del _sessions[token]
+    if token:
+        await _db.collection("sessions").document(token).delete()
     response = RedirectResponse(url="/app/")
     response.delete_cookie("sofia_session")
     return response
@@ -184,7 +205,7 @@ async def remove_absence(absence_id: str, email: str = Depends(require_auth)):
 
 @router.get("/auth/me")
 async def auth_me(request: Request):
-    email = _get_session_email(request)
+    email = await _get_session_email(request)
     if not email:
         return JSONResponse({"authenticated": False}, status_code=401)
     return {"authenticated": True, "email": email}
