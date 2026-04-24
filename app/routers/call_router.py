@@ -31,6 +31,12 @@ from app.utils.twiml_builder import (
     build_answer_twiml,
     build_fallback_twiml,
     build_farewell_twiml,
+    build_email_offer_twiml,
+    build_email_offer_custom_twiml,
+    build_addition_ask_twiml,
+    build_callback_offer_twiml,
+    build_callback_phone_twiml,
+    build_goodbye_hangup_twiml,
 )
 
 db = firestore.Client()
@@ -200,18 +206,6 @@ def _build_retry_phone_twiml() -> str:
   <Redirect method="POST">/call/process_contact</Redirect>
 </Response>"""
 
-
-def _build_phonebook_anliegen_twiml(person_name: str) -> str:
-    last = person_name.split(",")[0].strip()
-    msg = f"Ich habe {last} im Verzeichnis gefunden. Was ist der Anlass Ihres Anrufs? Ich leite das gerne weiter."
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Gather input="speech" action="/call/transcribe" method="POST"
-          language="de-DE" speechTimeout="7">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
-  </Gather>
-  <Redirect method="POST">/call/transcribe</Redirect>
-</Response>"""
 
 
 FAREWELL_KEYWORDS = [
@@ -393,18 +387,69 @@ async def process(
     # --------------------------------------------------------
     pending = get_pending_contact(CallSid)
 
+    # Stage: email_offered — Angebot "Email schicken?"
+    if pending and pending.get("stage") == "email_offered":
+        category = pending["category"]
+        logger.info("[PROCESS] Stage=email_offered | CallSid=%s | Speech='%s'", CallSid, speech_result)
+        save_message(CallSid, "user", speech_result)
+        if _is_consent(speech_result):
+            update_pending_contact(CallSid, stage="addition_asked")
+            if lat_logger:
+                lat_logger.finish()
+            return Response(content=build_addition_ask_twiml(), media_type="application/xml")
+        elif _is_refusal(speech_result):
+            update_pending_contact(CallSid, stage="callback_offered")
+            if lat_logger:
+                lat_logger.finish()
+            return Response(content=build_callback_offer_twiml(category), media_type="application/xml")
+        else:
+            new_anliegen = pending.get("anliegen", "") + " " + speech_result
+            update_pending_contact(CallSid, anliegen=new_anliegen.strip())
+            if lat_logger:
+                lat_logger.finish()
+            return Response(content=build_email_offer_twiml(category), media_type="application/xml")
+
+    # Stage: addition_asked — "Möchten Sie noch etwas ergänzen?"
+    if pending and pending.get("stage") == "addition_asked":
+        logger.info("[PROCESS] Stage=addition_asked | CallSid=%s", CallSid)
+        save_message(CallSid, "user", speech_result)
+        if not _is_refusal(speech_result):
+            new_anliegen = pending.get("anliegen", "") + " Ergänzung: " + speech_result
+            update_pending_contact(CallSid, anliegen=new_anliegen.strip(), stage="kontakt")
+        else:
+            update_pending_contact(CallSid, stage="kontakt")
+        if lat_logger:
+            lat_logger.finish()
+        return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
+
+    # Stage: callback_offered — "Möchten Sie stattdessen einen Rückruf?"
+    if pending and pending.get("stage") == "callback_offered":
+        logger.info("[PROCESS] Stage=callback_offered | CallSid=%s | Speech='%s'", CallSid, speech_result)
+        save_message(CallSid, "user", speech_result)
+        if _is_consent(speech_result):
+            flagged = "[RÜCKRUF ERWÜNSCHT] " + pending.get("anliegen", "")
+            update_pending_contact(CallSid, stage="kontakt", anliegen=flagged.strip())
+            if lat_logger:
+                lat_logger.finish()
+            return Response(content=build_callback_phone_twiml(), media_type="application/xml")
+        else:
+            get_and_delete_pending_contact(CallSid)
+            if lat_logger:
+                lat_logger.finish()
+            return Response(content=build_goodbye_hangup_twiml(), media_type="application/xml")
+
+    # Stage: anliegen — Anliegen erhalten → Email anbieten
     if pending and pending.get("stage") == "anliegen":
-        # Schritt 2: Anliegen erhalten → Kontaktdaten anbieten
-        logger.info("[PROCESS] Stage=anliegen, speichere Anliegen und biete Kontaktdaten an. CallSid=%s", CallSid)
+        logger.info("[PROCESS] Stage=anliegen, speichere Anliegen und biete Email an. CallSid=%s", CallSid)
         save_message(CallSid, "user", speech_result)
         try:
-            update_pending_contact(CallSid, anliegen=speech_result, stage="kontakt")
+            update_pending_contact(CallSid, anliegen=speech_result, stage="email_offered")
         except Exception as exc:
             logger.warning("[PROCESS] update_pending_contact fehlgeschlagen: %s", exc)
         if lat_logger:
             lat_logger.mark("routing_stage2")
             lat_logger.finish()
-        return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
+        return Response(content=build_email_offer_twiml(pending["category"]), media_type="application/xml")
 
     # Schritt 1a: "Nachricht hinterlassen"-Intent → Verwaltungs-Routing
     if _detect_nachricht_intent(speech_result):
@@ -421,15 +466,33 @@ async def process(
             lat_logger.finish()
         return Response(content=_build_anliegen_request_twiml("nachricht"), media_type="application/xml")
 
-    # Schritt 1b: Telefonbuch-Intent prüfen und code-level routen
+    # Schritt 1b: Telefonbuch-Intent prüfen → Abwesenheitscheck → Email anbieten
     is_phonebook = _detect_phonebook_intent(speech_result)
     if is_phonebook:
         person = phonebook_service.find_in_text(speech_result)
         if person:
             logger.info("[PROCESS] Telefonbuch-Match: %s | CallSid=%s", person["name"], CallSid)
             save_message(CallSid, "user", speech_result)
+
+            is_stephan = ("müller" in person["name"].lower() and "stephan" in person["name"].lower())
+            absence = await get_active_absence() if is_stephan else None
+            last = person["name"].split(",")[0].strip()
+            durchwahl = person.get("durchwahl", "")
+
+            if absence:
+                absence_text = build_sofia_text(absence)
+                msg = f"{absence_text} Soll ich {last} eine Nachricht hinterlassen?"
+            elif durchwahl:
+                msg = (
+                    f"{last} ist erreichbar. Sie können direkt unter Durchwahl {durchwahl} anrufen. "
+                    f"Oder soll ich {last} über Ihren Anruf informieren?"
+                )
+            else:
+                msg = f"Soll ich {last} eine Nachricht über Ihren Anruf hinterlassen?"
+
             try:
-                save_pending_contact(CallSid, "phonebook", speech_result, from_number, stage="anliegen")
+                save_pending_contact(CallSid, "phonebook", speech_result, from_number,
+                                     stage="email_offered", anliegen=speech_result)
                 update_pending_contact(CallSid,
                     person_name=person["name"],
                     person_email=person.get("email", ""))
@@ -438,8 +501,7 @@ async def process(
             if lat_logger:
                 lat_logger.mark("routing_phonebook")
                 lat_logger.finish()
-            return Response(content=_build_phonebook_anliegen_twiml(person["name"]),
-                            media_type="application/xml")
+            return Response(content=build_email_offer_custom_twiml(msg), media_type="application/xml")
         else:
             logger.info("[PROCESS] Telefonbuch-Intent ohne Match — gehe zu RAG. CallSid=%s", CallSid)
 
@@ -450,18 +512,17 @@ async def process(
         logger.info("[PROCESS] Kategorie erkannt: %s | Wörter: %d | CallSid=%s", category, word_count, CallSid)
         save_message(CallSid, "user", speech_result)
         if word_count >= MIN_ANLIEGEN_WORDS:
-            # Anliegen bereits ausreichend geschildert → direkt Kontaktdaten erfragen
-            logger.info("[PROCESS] Anliegen ausreichend (%d Wörter) — überspringe Anliegen-Abfrage", word_count)
+            logger.info("[PROCESS] Anliegen ausreichend (%d Wörter) — biete Email an", word_count)
             try:
-                save_pending_contact(CallSid, category, speech_result, from_number, stage="kontakt", anliegen=speech_result)
+                save_pending_contact(CallSid, category, speech_result, from_number,
+                                     stage="email_offered", anliegen=speech_result)
             except Exception as exc:
                 logger.warning("[PROCESS] save_pending_contact fehlgeschlagen: %s", exc)
             if lat_logger:
                 lat_logger.mark("routing_stage1_direct")
                 lat_logger.finish()
-            return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
+            return Response(content=build_email_offer_twiml(category), media_type="application/xml")
         else:
-            # Zu kurz → Anliegen nachfragen
             prompt_text = _ANLIEGEN_PROMPTS.get(category, "Was genau kann ich für Sie tun? Bitte schildern Sie kurz Ihr Anliegen.")
             save_message(CallSid, "assistant", prompt_text)
             try:
@@ -586,17 +647,21 @@ async def process_contact(
         team_name_override=pending.get("person_name") or None,
     )
 
-    # G) Bestätigung + Verabschiedung (kategoriespezifisch)
-    _FAREWELL_BY_CATEGORY = {
-        "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
-        "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
-        "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
-        "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
-        "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören.",
-        "phonebook":  "Vielen Dank. Ihr Anliegen wird direkt weitergeleitet. Auf Wiederhören.",
-        "nachricht":  "Vielen Dank. Ihre Nachricht wurde notiert und wird an Herrn Müller weitergeleitet. Auf Wiederhören.",
-    }
-    farewell_msg = _FAREWELL_BY_CATEGORY.get(category, "Vielen Dank. Ihre Anfrage wurde weitergeleitet. Auf Wiederhören.")
+    # G) Bestätigung + Verabschiedung (Email vs. Rückruf)
+    is_callback = anliegen.startswith("[RÜCKRUF ERWÜNSCHT]")
+    if is_callback:
+        _CALLBACK_FAREWELL = {
+            "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            "phonebook":  "Vielen Dank. Die Person wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            "nachricht":  "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+        }
+        farewell_msg = _CALLBACK_FAREWELL.get(category, "Vielen Dank. Es wird sich jemand bei Ihnen melden. Auf Wiederhören!")
+    else:
+        farewell_msg = "Vielen Dank für Ihren Anruf. Ich wünsche Ihnen noch einen schönen Tag. Auf Wiederhören!"
     save_message(CallSid, "assistant", farewell_msg)
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>

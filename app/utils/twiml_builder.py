@@ -102,3 +102,85 @@ def build_fallback_twiml(message: str, transcribe_url: str) -> str:
     <Say language="de-DE" voice="Google.de-DE-Neural2-F">{message}</Say>
   </Gather>
 </Response>"""
+
+
+# ── Stage-Flow TwiML-Builder ─────────────────────────────────
+
+_VOICE = "Google.de-DE-Neural2-F"
+
+_TEAM_NAMES = {
+    "erp":        "dem ERP-Support",
+    "evs":        "dem EVS-Support",
+    "hr":         "dem HR-Support",
+    "it":         "dem IT-Support",
+    "verwaltung": "Herrn Müller",
+    "nachricht":  "Herrn Müller",
+    "phonebook":  "der zuständigen Person",
+}
+
+_EMAIL_OFFER_MESSAGES = {
+    "erp":        "Soll ich Ihr Anliegen per E-Mail an den ERP-Support weiterleiten?",
+    "evs":        "Soll ich Ihr Anliegen per E-Mail an den EVS-Support weiterleiten?",
+    "hr":         "Soll ich Ihr Anliegen per E-Mail an den HR-Support weiterleiten?",
+    "it":         "Soll ich Ihr Anliegen per E-Mail an den IT-Support weiterleiten?",
+    "verwaltung": "Soll ich Ihr Anliegen per E-Mail an Herrn Müller weiterleiten?",
+    "nachricht":  "Soll ich Ihre Nachricht per E-Mail an Herrn Müller weiterleiten?",
+    "phonebook":  "Soll ich Ihr Anliegen per E-Mail weiterleiten?",
+}
+
+
+def _xml_escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+    )
+
+
+def _build_gather(msg: str, action: str) -> str:
+    safe = _xml_escape(msg)
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="{action}" method="POST"
+          language="de-DE" speechTimeout="7">
+    <Say language="de-DE" voice="{_VOICE}">{safe}</Say>
+  </Gather>
+  <Redirect method="POST">{action}</Redirect>
+</Response>"""
+
+
+def build_email_offer_twiml(category: str) -> str:
+    msg = _EMAIL_OFFER_MESSAGES.get(category, "Soll ich Ihr Anliegen per E-Mail weiterleiten?")
+    return _build_gather(msg, "/call/process")
+
+
+def build_email_offer_custom_twiml(msg: str) -> str:
+    return _build_gather(msg, "/call/process")
+
+
+def build_addition_ask_twiml() -> str:
+    return _build_gather(
+        "Möchten Sie noch etwas ergänzen? Wenn nicht, sagen Sie einfach Nein.",
+        "/call/process",
+    )
+
+
+def build_callback_offer_twiml(category: str) -> str:
+    team = _TEAM_NAMES.get(category, "dem zuständigen Team")
+    msg = f"Kein Problem. Möchten Sie stattdessen einen Rückruf von {team}?"
+    return _build_gather(msg, "/call/process")
+
+
+def build_callback_phone_twiml() -> str:
+    return _build_gather("Wie lautet Ihre Rückrufnummer?", "/call/process_contact")
+
+
+def build_goodbye_hangup_twiml() -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="de-DE" voice="{_VOICE}">
+    Kein Problem. Vielen Dank für Ihren Anruf. Ich wünsche Ihnen noch einen schönen Tag. Auf Wiederhören!
+  </Say>
+  <Hangup/>
+</Response>"""

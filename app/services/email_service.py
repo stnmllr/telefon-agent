@@ -63,6 +63,7 @@ async def send_routing_email(
         return False
     else:
         team_name, recipient_email = CATEGORY_EMAILS[category]
+    is_callback = user_question.startswith("[RÜCKRUF ERWÜNSCHT]")
     now = datetime.now().strftime("%d.%m.%Y %H:%M Uhr")
     contact = caller_contact or {}
     extracted_phone = contact.get("phone", "")
@@ -79,10 +80,14 @@ async def send_routing_email(
         "verwaltung": "Verwaltungs-Anfrage",
     }.get(category, "Anfrage")
 
-    subject = f"[KI-Agent] Anruf von {caller_number} — {category_label}"
+    if is_callback:
+        subject = f"[KI-Agent] Rückrufbitte von {caller_number} — {category_label}"
+    else:
+        subject = f"[KI-Agent] Anruf von {caller_number} — {category_label}"
 
+    callback_note = "\n*** RÜCKRUF ERBETEN — bitte den Anrufer zurückrufen ***\n" if is_callback else ""
     body = f"""Hallo {team_name},
-
+{callback_note}
 der KI-Telefon-Agent hat einen Anruf weitergeleitet, der Ihr Team betrifft.
 
 ─────────────────────────────────────────
@@ -105,6 +110,12 @@ Mit freundlichen Grüßen
 KI-Telefon-Agent — SOPRA System GmbH
 """
 
+    callback_badge = (
+        '<div style="background:#c0392b;color:white;padding:10px 24px;font-weight:bold;font-size:14px">'
+        '&#128222; RÜCKRUF ERBETEN — bitte den Anrufer zurückrufen'
+        '</div>'
+    ) if is_callback else ""
+
     html_body = f"""
 <html><body style="font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto">
 
@@ -112,6 +123,7 @@ KI-Telefon-Agent — SOPRA System GmbH
   <h2 style="margin:0;font-size:18px">Sofia – Anruf-Weiterleitung</h2>
   <p style="margin:4px 0 0;font-size:13px;opacity:0.8">Digitaler Assistent von Stephan Müller</p>
 </div>
+{callback_badge}
 
 <div style="border:1px solid #ddd;border-top:none;padding:20px 24px;border-radius:0 0 6px 6px">
 
