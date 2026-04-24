@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     stt_model: str = "chirp"
 
     # TTS
-    tts_voice: str = "de-DE-Neural2-F"
+    tts_voice: str = "de-DE-Journey-F"
     tts_speaking_rate: float = 1.0
 
     # RAG

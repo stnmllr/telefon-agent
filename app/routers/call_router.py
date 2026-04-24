@@ -173,7 +173,7 @@ def _build_anliegen_request_twiml(category: str) -> str:
 <Response>
   <Gather input="speech" action="/call/transcribe" method="POST"
           language="de-DE" speechTimeout="7">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Journey-F">{msg}</Say>
   </Gather>
   <Redirect method="POST">/call/transcribe</Redirect>
 </Response>"""
@@ -184,7 +184,7 @@ def _build_contact_offer_twiml() -> str:
 <Response>
   <Gather input="speech" action="/call/process_contact" method="POST"
           language="de-DE" speechTimeout="7">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Darf ich kurz Ihre Rückruf-Nummer notieren?</Say>
+    <Say language="de-DE" voice="Google.de-DE-Journey-F">Darf ich kurz Ihre Rückruf-Nummer notieren?</Say>
   </Gather>
   <Redirect method="POST">/call/process_contact</Redirect>
 </Response>"""
@@ -195,7 +195,7 @@ def _build_retry_phone_twiml() -> str:
 <Response>
   <Gather input="speech" action="/call/process_contact" method="POST"
           language="de-DE" speechTimeout="7">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">Vielen Dank. Wie lautet Ihre Rückrufnummer?</Say>
+    <Say language="de-DE" voice="Google.de-DE-Journey-F">Vielen Dank. Wie lautet Ihre Rückrufnummer?</Say>
   </Gather>
   <Redirect method="POST">/call/process_contact</Redirect>
 </Response>"""
@@ -208,7 +208,7 @@ def _build_phonebook_anliegen_twiml(person_name: str) -> str:
 <Response>
   <Gather input="speech" action="/call/transcribe" method="POST"
           language="de-DE" speechTimeout="7">
-    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+    <Say language="de-DE" voice="Google.de-DE-Journey-F">{msg}</Say>
   </Gather>
   <Redirect method="POST">/call/transcribe</Redirect>
 </Response>"""
@@ -546,7 +546,7 @@ async def process_contact(
             msg = f"Kein Problem. Bitte wenden Sie sich direkt an {team_name}. Auf Wiederhören."
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+  <Say language="de-DE" voice="Google.de-DE-Journey-F">{msg}</Say>
   <Hangup/>
 </Response>"""
         return Response(content=twiml, media_type="application/xml")
@@ -601,7 +601,7 @@ async def process_contact(
     save_message(CallSid, "assistant", farewell_msg)
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="de-DE" voice="Google.de-DE-Neural2-F">{farewell_msg}</Say>
+  <Say language="de-DE" voice="Google.de-DE-Journey-F">{farewell_msg}</Say>
   <Hangup/>
 </Response>"""
     return Response(content=twiml, media_type="application/xml")
