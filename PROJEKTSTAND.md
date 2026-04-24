@@ -1,4 +1,4 @@
-# KI-Telefon-Agent — Projektstand 21.04.2026
+# KI-Telefon-Agent — Projektstand 24.04.2026
 
 ## Infrastruktur
 
@@ -10,7 +10,7 @@
 | Bucket | gs://boxwood-mantra-489408-c0-handbuecher/ |
 | Vertex AI Search FIBU | handbuecher-engine → handbuecher-v2 (Enterprise ✅), Location: global |
 | Vertex AI Search ERP | erp-engine → handbuecher-erp (Enterprise ✅), Location: global |
-| Firestore | Conversation Memory + Pending-Cache + pending_contact |
+| Firestore | Conversation Memory + Pending-Cache + pending_contact + absence + oauth_states |
 | Twilio | +49 89 41432469, Webhook auf /call/incoming |
 | GitHub | stnmllr/telefon-agent, CI/CD via GitHub Actions (Push main → auto-deploy) |
 | Service Account | 1051648887841-compute@developer.gserviceaccount.com |
@@ -49,7 +49,7 @@ VERTEX_SEARCH_DATASTORE_FIBU=handbuecher-v2
 VERTEX_SEARCH_DATASTORE_ERP=handbuecher-erp
 STT_LANGUAGE=de-DE
 STT_MODEL=chirp
-TTS_VOICE=de-DE-Neural2-F
+TTS_VOICE=de-DE-Journey-F          ← neu (war: Neural2-F)
 TTS_SPEAKING_RATE=1.0
 RAG_TOP_K=5
 RAG_MAX_TOKENS=400
@@ -58,6 +58,11 @@ LATENCY_LOGGING=false
 SENDGRID_API_KEY=SG.xxx... (gesetzt)
 EMAIL_FROM=stn.mueller@gmail.com     ← temporär, bis DNS für ki-agent@sopra-system.com
 EMAIL_FROM_NAME=Sofia – Assistent Stephan Müller
+GOOGLE_CLIENT_ID=1051648887841-0iudban8gq0c8k0vohiplvea3k0i7jrd.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-... (gesetzt)
+ALLOWED_EMAIL=stn.mueller@gmail.com
+APP_SECRET_KEY=sofia-secret-2026-... (gesetzt)
+BASE_URL=https://telefon-agent-1051648887841.europe-west3.run.app
 ```
 
 ## Projektstruktur
@@ -67,12 +72,18 @@ app/
 ├── data/
 │   └── telefonbuch.csv
 ├── routers/
-│   └── call_router.py           ← Twilio Webhooks + Routing + /call/process_contact
+│   ├── call_router.py           ← Twilio Webhooks + Routing + /call/process_contact
+│   └── app_router.py            ← PWA Backend: Google OAuth + Abwesenheits-CRUD
 ├── services/
-│   ├── rag_service.py           ← LLM + RAG + _detect_datastore() + extract_contact_data() + summarize_conversation()
+│   ├── rag_service.py           ← LLM + RAG + _detect_datastore() + Abwesenheitscheck
 │   ├── memory_service.py        ← Firestore: Memory + save/get/update_pending_contact()
-│   ├── email_service.py         ← SendGrid E-Mail Service (recipient_override + team_name_override)
+│   ├── email_service.py         ← SendGrid E-Mail Service
+│   ├── absence_service.py       ← Firestore CRUD für Abwesenheiten + build_sofia_text()
 │   └── phonebook_service.py
+├── static/
+│   ├── index.html               ← PWA Frontend (Sofia Abwesenheits-App)
+│   ├── manifest.json            ← PWA Manifest
+│   └── sw.js                   ← Service Worker
 └── utils/
     ├── twiml_builder.py
     └── latency_logger.py
@@ -84,7 +95,8 @@ upload_erp_v4.bat                ← ERP Doku Upload (für künftige Updates)
 
 ```
 POST /call/incoming
-→ "Hallo, mein Name ist Sofia, ich bin der digitale Assistent von Stephan Müller."
+→ Abwesenheitscheck → falls aktiv: Abwesenheitshinweis in Begrüßung
+→ "Hallo, mein Name ist Sofia, ich bin der AI-Assistent von Stephan Müller."
 
 POST /call/transcribe
 → STT → STT-Normalisierung (z.B. "Stefan" → "Stephan") → Redirect zu /call/process
@@ -102,6 +114,7 @@ POST /call/process
      - < 15 Wörter → erst Anliegen abfragen
 → 4. Keyword-Routing (ERP/EVS/HR/IT/Verwaltung)
 → 5. Kein Match → RAG-Pipeline (_detect_datastore → FIBU oder ERP oder beide)
+→ 6. Verabschiedung bei "Nein danke / Tschüss" → freundlicher Abschluss + Hangup
 
 POST /call/process_contact
 → Kontaktdaten extrahieren (nur Telefon)
@@ -121,8 +134,8 @@ POST /call/process_contact
 | HR | HR, Personal, Urlaub, Gehalt... | hr-support@sopra-system.com | 116 |
 | IT | Computer, PC, Laptop, Drucker, Netzwerk, Login, Passwort... | it-support@sopra-system.com | 115 |
 | Verwaltung | Vertrag, Rechnung, Preis, Lizenz... | Stephan.Mueller@sopra-system.com | 26 |
-| Telefonbuch | möchte/würde/will/kann ich X sprechen, suche, verbinden | person_email aus telefonbuch.csv | wird genannt |
-| Verabschiedung | Nein danke, Tschüss... | — | — |
+| Telefonbuch | sprechen, möchte/würde/will/kann ich X sprechen, suche, verbinden | person_email aus telefonbuch.csv | wird genannt |
+| Verabschiedung | Nein danke, Tschüss... | — | Hangup |
 
 ## Multi-Datastore RAG (_detect_datastore)
 
@@ -162,6 +175,8 @@ POST /call/process_contact
 | conversations/{CallSid} | Gesprächsverlauf (Memory) |
 | pending/{CallSid} | SpeechResult Zwischenspeicher |
 | pending_contact/{CallSid} | stage + anliegen + category + from_number + person_name + person_email |
+| absence/{id} | Abwesenheiten (type, start, end, note, created_at) |
+| oauth_states/{state} | OAuth State (TTL 10 Min, verhindert Multi-Instanz-Problem) |
 
 ### pending_contact Felder
 ```
@@ -173,6 +188,33 @@ from_number:   Twilio From-Nummer
 person_name:   Name aus telefonbuch.csv (nur bei phonebook)
 person_email:  E-Mail aus telefonbuch.csv (nur bei phonebook)
 timestamp:     Erstellungszeitpunkt
+```
+
+### absence Felder
+```
+type:        urlaub | meeting | abwesend | dienstreise
+start:       ISO-8601 datetime (z.B. "2026-04-25T09:00")
+end:         ISO-8601 datetime oder date (Meeting: Uhrzeit, sonst: Datum)
+note:        optional
+created_at:  timestamp
+```
+
+## Sofia Handy-App (PWA)
+
+| Komponente | Details |
+|---|---|
+| URL | https://telefon-agent-1051648887841.europe-west3.run.app/app/ |
+| Auth | Google OAuth (nur stn.mueller@gmail.com) |
+| iPhone | Als PWA zum Homescreen hinzufügen (Safari → Teilen → Zum Home-Bildschirm) |
+| Funktion | Abwesenheit eintragen (Urlaub/Meeting/Abwesend/Dienstreise) mit Von–Bis |
+| Sofia-Integration | Abwesenheitscheck beim Anruf → Sofia informiert Anrufer automatisch |
+
+### Sofia-Texte je Abwesenheitstyp
+```
+Urlaub:      "Herr Müller ist im Urlaub und ab [Datum] wieder erreichbar."
+Meeting:     "Herr Müller ist gerade im Meeting und ab [Uhrzeit] Uhr wieder erreichbar."
+Abwesend:    "Herr Müller ist derzeit abwesend und ab [Datum] wieder erreichbar."
+Dienstreise: "Herr Müller ist auf Dienstreise und ab [Datum] wieder erreichbar."
 ```
 
 ## Kosten (monatlich, Schätzung)
@@ -187,41 +229,48 @@ timestamp:     Erstellungszeitpunkt
 | SendGrid | ~$0 (Free Plan) |
 | **Gesamt** | **~$7–14/Monat** |
 
-Budget-Alert: €10/Monat eingerichtet ✅ → auf €15 erhöhen (2. Datastore)
+Budget-Alert: €15/Monat ✅
+
+## Wichtige Fixes dieser Session (24.04.2026)
+
+- **Phonebook-Intent Fix:** `\bsprechen\b` greift jetzt ohne Modalverb → natürliche Sprache wie "Stephan Müller sprechen" wird erkannt
+- **Halluzinations-Sperre:** LLM darf nicht mehr behaupten, eine E-Mail verschickt zu haben
+- **Abwesenheitscheck:** `answer_question()` prüft beim ersten Turn Firestore auf aktive Abwesenheit
+- **Verabschiedung:** SYSTEM_PROMPT ergänzt → Sofia verabschiedet sich freundlich bei "Nein danke"
+- **TTS-Stimme:** `de-DE-Journey-F` (war: Neural2-F) — klingt natürlicher, weniger AB-artig
+- **AI-Assistent:** Begrüßung geändert von "digitaler Assistent" zu "AI-Assistent"
+- **PWA OAuth State:** oauth_states in Firestore (war: In-Memory) → Multi-Instanz-sicher ✅
 
 ## NÄCHSTE SESSION — Offene Punkte (Reihenfolge)
 
-### 1. Handy App
-Die Handy‑App ist eine kleine Web‑App (PWA), mit der du deine Abwesenheit (z. B. Urlaub oder Krankheit) direkt am iPhone einträgst.
-Diese Info nutzt Sofia, um Anrufer automatisch korrekt zu informieren oder Anrufe an eine Vertretung weiterzuleiten.
+### 1. Journey-F Testanruf auswerten
+Falls Journey-F nicht reicht → ElevenLabs Integration evaluieren ($22/Monat Creator Plan)
 
-### 2. Budget-Alert auf €15 erhöhen
-Zweiter Datastore aktiv — Alert anpassen.
-
-### 3. Outlook-Kalender Integration ← kommt vermutlich nicht
-Azure App Registration mit Calendars.Read benötigt.
-
-### 4. Qualität
+### 2. Qualität
 - Szenario 7 verfeinern: "Rechnung an Kunden" = FIBU, "Wartungsvertrag/Lizenz" = Verwaltung
 - SSML `<say-as interpret-as="telephone">` für Durchwahl-Aussprache
 - MIN_ANLIEGEN_WORDS Schwellenwert in Praxis testen und ggf. anpassen
 - Ticketnummer-Vergabe bei E-Mail (Vorstufe Helpdesk)
-- `.doc` Dateien in `erp/artikel/` nach `.docx` konvertieren → ERP-Datastore vervollständigen
 
-### 5. eval_agent.py
+### 3. eval_agent.py
 Automatisierter Test-Loop — sinnvoll sobald Basis-Flow stabil.
 
+### 4. Custom Domain
+`sofia.sopra-system.com` für die PWA App — GCP Cloud Run unterstützt Custom Domains direkt.
+
+### 5. Outlook-Kalender Integration
+Azure App Registration mit Calendars.Read benötigt. Bei Ben nachfragen, wenn Agent stabil.
 
 ## Wichtige Architektur-Entscheidungen
 
-- Agent-Name: **Sofia** (digitaler Assistent von Stephan Müller)
+- Agent-Name: **Sofia** (AI-Assistent von Stephan Müller)
 - Vertex AI Search: 2 Datastores — FIBU (`handbuecher-v2`) + ERP (`handbuecher-erp`)
 - Nur unterstützte Dateitypen in GCS: `docx, pdf, pptx, txt, xlsx` (kein `.doc`)
 - E-Mail-Adresse wird nicht per Sprache erfasst — zu fehleranfällig (STT)
 - Rückrufnummer: aus STT extrahiert, Fallback: Twilio `From`
 - Kontaktdaten-Flow: Anliegen (bei < 15 Wörtern) → Kontaktdaten → E-Mail ODER Durchwahl
 - "Ja gerne" ohne Nummer → einmalige Nachfrage, dann Fallback auf Twilio From
-- Telefonbuch-Flow: Intent-Erkennung per Regex → find_in_text() → Anliegen → Rückrufnummer → E-Mail direkt an Person
+- Telefonbuch-Flow: Intent-Erkennung per Regex (`\bsprechen\b` + Modalverben) → find_in_text() → Anliegen → Rückrufnummer → E-Mail direkt an Person
 - Gesprächszusammenfassung per Gemini in E-Mail
 - Durchwahl nur als letzter Fallback wenn Anrufer E-Mail ablehnt
 - Multi-Datastore RAG: _detect_datastore() wählt FIBU/ERP/beide dynamisch
@@ -229,3 +278,5 @@ Automatisierter Test-Loop — sinnvoll sobald Basis-Flow stabil.
 - PowerShell in VS Code → immer Command Prompt verwenden
 - Claude Code: Plan-Modus für komplexere Änderungen verwenden
 - Test: test_scenarios.bat im Projektordner ausführen
+- DSGVO: Kein "Krank" als Abwesenheitstyp — stattdessen "Abwesend" (neutral)
+- OAuth State: Firestore statt In-Memory (Multi-Instanz-sicher)
