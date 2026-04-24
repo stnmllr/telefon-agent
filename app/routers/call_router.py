@@ -240,19 +240,18 @@ async def incoming_call():
 
     logger.info("[INCOMING] Neuer Anruf gestartet.")
 
-    _AI = '<say-as interpret-as="characters">AI</say-as>'
     absence = await get_active_absence()
     if absence:
         absence_text = build_sofia_text(absence)
         message = (
-            f"Guten Tag! Sie sprechen mit Sofia, dem {_AI}-Assistenten von Stephan Müller. "
+            f"Guten Tag! Sie sprechen mit Sofia, dem KahIh-Assistenten von Stephan Müller. "
             f"{absence_text} Kann ich Ihnen trotzdem helfen oder eine Nachricht entgegennehmen?"
         )
         logger.info("[INCOMING] Abwesenheit aktiv: %s", absence.get("type"))
     else:
         message = (
-            f"Guten Tag! Sie sprechen mit Sofia, dem {_AI}-Assistenten von Stephan Müller. "
-            f"Bitte schildern Sie kurz Ihr Anliegen, ich leite es zuverlässig weiter."
+            "Guten Tag! Sie sprechen mit Sofia, dem KahIh-Assistenten von Stephan Müller. "
+            "Bitte schildern Sie kurz Ihr Anliegen, ich leite es zuverlässig weiter."
         )
 
     twiml = build_welcome_twiml(
