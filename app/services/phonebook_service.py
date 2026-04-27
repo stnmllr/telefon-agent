@@ -21,6 +21,7 @@ def lookup(name: str) -> Optional[dict]:
                     "durchwahl": row["Durchwahl"],
                     "beschreibung": row["Beschreibung"],
                     "email": row["Email"],
+                    "anrede": row.get("Anrede", ""),
                 }
     return None
 
@@ -69,5 +70,6 @@ def lookup_by_description(beschreibung: str) -> Optional[dict]:
                     "durchwahl": row["Durchwahl"],
                     "beschreibung": row["Beschreibung"],
                     "email": row["Email"],
+                    "anrede": row.get("Anrede", ""),
                 }
     return None

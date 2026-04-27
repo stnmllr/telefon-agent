@@ -238,13 +238,13 @@ async def incoming_call():
     if absence:
         absence_text = build_sofia_text(absence)
         message = (
-            f"Guten Tag! Sie sprechen mit Sofia, dem KahIh-Assistenten von Stephan Müller. "
+            f"Guten Tag! Sie sprechen mit Sofia, dem Kah-ie-Assistenten von Stephan Müller. "
             f"{absence_text} Kann ich Ihnen trotzdem helfen oder eine Nachricht entgegennehmen?"
         )
         logger.info("[INCOMING] Abwesenheit aktiv: %s", absence.get("type"))
     else:
         message = (
-            "Guten Tag! Sie sprechen mit Sofia, dem KahIh-Assistenten von Stephan Müller. "
+            "Guten Tag! Sie sprechen mit Sofia, dem Kah-ie-Assistenten von Stephan Müller. "
             "Bitte schildern Sie kurz Ihr Anliegen, ich leite es zuverlässig weiter."
         )
 
@@ -477,24 +477,27 @@ async def process(
             is_stephan = ("müller" in person["name"].lower() and "stephan" in person["name"].lower())
             absence = await get_active_absence() if is_stephan else None
             last = person["name"].split(",")[0].strip()
+            anrede = person.get("anrede", "")
+            addressed = f"{anrede} {last}".strip() if anrede else last
             durchwahl = person.get("durchwahl", "")
 
             if absence:
                 absence_text = build_sofia_text(absence)
-                msg = f"{absence_text} Soll ich {last} eine Nachricht hinterlassen?"
+                msg = f"{absence_text} Soll ich {addressed} eine Nachricht hinterlassen?"
             elif durchwahl:
                 msg = (
-                    f"{last} ist erreichbar. Sie können direkt unter Durchwahl {durchwahl} anrufen. "
-                    f"Oder soll ich {last} über Ihren Anruf informieren?"
+                    f"{addressed} ist erreichbar. Sie können direkt unter Durchwahl {durchwahl} anrufen. "
+                    f"Oder soll ich {addressed} über Ihren Anruf informieren?"
                 )
             else:
-                msg = f"Soll ich {last} eine Nachricht über Ihren Anruf hinterlassen?"
+                msg = f"Soll ich {addressed} eine Nachricht über Ihren Anruf hinterlassen?"
 
             try:
                 save_pending_contact(CallSid, "phonebook", speech_result, from_number,
                                      stage="email_offered", anliegen=speech_result)
                 update_pending_contact(CallSid,
                     person_name=person["name"],
+                    person_anrede=anrede,
                     person_email=person.get("email", ""))
             except Exception as exc:
                 logger.warning("[PROCESS] save_pending_contact phonebook fehlgeschlagen: %s", exc)
@@ -650,16 +653,21 @@ async def process_contact(
     # G) Bestätigung + Verabschiedung (Email vs. Rückruf)
     is_callback = anliegen.startswith("[RÜCKRUF ERWÜNSCHT]")
     if is_callback:
-        _CALLBACK_FAREWELL = {
-            "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-            "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-            "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-            "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-            "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-            "phonebook":  "Vielen Dank. Die Person wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-            "nachricht":  "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-        }
-        farewell_msg = _CALLBACK_FAREWELL.get(category, "Vielen Dank. Es wird sich jemand bei Ihnen melden. Auf Wiederhören!")
+        if category == "phonebook":
+            pb_anrede = pending.get("person_anrede", "")
+            pb_last = (pending.get("person_name", "").split(",")[0].strip()) if pending.get("person_name") else ""
+            pb_addressed = f"{pb_anrede} {pb_last}".strip() if (pb_anrede and pb_last) else (pb_last or "die zuständige Person")
+            farewell_msg = f"Vielen Dank. {pb_addressed} wird sich in Kürze bei Ihnen melden. Auf Wiederhören!"
+        else:
+            _CALLBACK_FAREWELL = {
+                "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+                "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+                "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+                "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+                "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+                "nachricht":  "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+            }
+            farewell_msg = _CALLBACK_FAREWELL.get(category, "Vielen Dank. Es wird sich jemand bei Ihnen melden. Auf Wiederhören!")
     else:
         farewell_msg = "Vielen Dank für Ihren Anruf. Ich wünsche Ihnen noch einen schönen Tag. Auf Wiederhören!"
     save_message(CallSid, "assistant", farewell_msg)
