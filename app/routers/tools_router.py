@@ -12,8 +12,9 @@ from google.cloud import firestore
 from google.api_core import exceptions as gexc
 
 from app.config import settings
-from app.tools import phonebook
+from app.tools import phonebook, recipients
 from app.tools.absence import build_sofia_text
+from app.services import routing_config, email_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tools")
@@ -96,3 +97,45 @@ async def check_absence(req: InitWebhookReq):
     else:
         dv = {"absence_active": "false", "absence_text": ""}
     return {"type": "conversation_initiation_client_data", "dynamic_variables": dv}
+
+
+# ── send_email ───────────────────────────────────────────────
+class SendEmailReq(BaseModel):
+    category: str
+    subject: str
+    body: str
+    caller_number: str = ""
+    callback_requested: bool = False
+    recipient_override: str | None = None
+    call_id: str | None = None
+    ticket_ref: str | None = None
+
+
+async def _resolve_recipient(req: "SendEmailReq") -> str:
+    if req.recipient_override:
+        if not recipients.validate_override(req.recipient_override, phonebook.all_emails()):
+            raise HTTPException(status_code=422, detail="recipient_override not in phonebook")
+        return req.recipient_override
+    routing = recipients.merge_routing(await routing_config.load_overrides())
+    recipient = recipients.resolve_recipient(req.category, routing)
+    if not recipient:
+        raise HTTPException(status_code=422, detail=f"no recipient for category '{req.category}'")
+    return recipient
+
+
+@router.post("/send_email", dependencies=[Depends(require_tool_token)])
+async def send_email(req: SendEmailReq):
+    dup = await reserve(req.call_id, "send_email")
+    if dup and dup.get("status") == "done":
+        return {"sent": dup.get("email_sent", True), "recipient": dup.get("recipient"),
+                "message_id": dup.get("message_id"), "ticket_ref": req.ticket_ref}
+
+    recipient = await _resolve_recipient(req)
+    ok, message_id = await email_service.send_email_raw(
+        recipient, req.subject, req.body,
+        ticket_ref=req.ticket_ref, callback=req.callback_requested)
+    await finalize(req.call_id, "send_email", recipient=recipient,
+                   message_id=message_id, email_sent=ok,
+                   category=req.category, caller_number=req.caller_number)
+    return {"sent": ok, "recipient": recipient, "message_id": message_id,
+            "ticket_ref": req.ticket_ref}
