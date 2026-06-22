@@ -270,6 +270,56 @@
     .toast.show { opacity: 1; }
 
     [hidden] { display: none !important; }
+
+    /* ── Routing Settings ── */
+    .routing-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .routing-row label {
+      width: 110px;
+      flex-shrink: 0;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .routing-row input[type="email"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .routing-row input[type="email"]:focus {
+      border-color: var(--accent);
+    }
+    .btn-routing-save {
+      width: 100%;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+    .btn-routing-save:active { opacity: 0.85; }
+    .routing-status {
+      display: block;
+      font-size: 13px;
+      color: var(--success);
+      margin-top: 8px;
+      min-height: 18px;
+    }
   </style>
 </head>
 <body>
@@ -350,6 +400,15 @@
     <div id="absence-list"><div class="empty-state"><div class="empty-emoji">✅</div>Keine Abwesenheiten eingetragen</div></div>
   </div>
 
+  <!-- Empfänger-Settings -->
+  <div class="card" id="routing-settings">
+    <div class="card-title">Empfänger</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px;">Ziel-E-Mail je Kategorie. Leeres Feld = Standard.</p>
+    <div id="routing-list"></div>
+    <button class="btn-routing-save" id="routing-save">Speichern</button>
+    <span class="routing-status" id="routing-status"></span>
+  </div>
+
 </div>
 
 <div class="toast" id="toast"></div>
@@ -371,6 +430,7 @@ async function init() {
     if (resp.ok) {
       document.getElementById("main-screen").removeAttribute("hidden");
       await loadAbsences();
+      await loadRouting();
       setDefaultDates();
     } else {
       document.getElementById("login-screen").removeAttribute("hidden");
@@ -534,6 +594,38 @@ async function deleteAbsence(id) {
     showToast("❌ Fehler beim Löschen", false);
   }
 }
+
+// ── Empfänger-Routing laden ───────────────────────────────────
+async function loadRouting() {
+  const res = await fetch("/app/api/routing", { credentials: "include" });
+  if (!res.ok) return;
+  const { routing } = await res.json();
+  const list = document.getElementById("routing-list");
+  list.innerHTML = "";
+  Object.keys(routing).sort().forEach((cat) => {
+    const row = document.createElement("div");
+    row.className = "routing-row";
+    row.innerHTML =
+      `<label>${cat}</label>` +
+      `<input type="email" data-cat="${cat}" value="${routing[cat]}">`;
+    list.appendChild(row);
+  });
+}
+
+document.getElementById("routing-save").addEventListener("click", async () => {
+  const inputs = document.querySelectorAll("#routing-list input[data-cat]");
+  const routing = {};
+  inputs.forEach((i) => { routing[i.dataset.cat] = i.value.trim(); });
+  const res = await fetch("/app/api/routing", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ routing }),
+  });
+  const statusEl = document.getElementById("routing-status");
+  statusEl.textContent = res.ok ? "Gespeichert ✓" : "Fehler beim Speichern";
+  if (res.ok) setTimeout(() => { statusEl.textContent = ""; }, 3000);
+});
 
 function logout() {
   window.location.href = "/app/auth/logout";
