@@ -37,6 +37,7 @@ from app.utils.twiml_builder import (
     build_callback_offer_twiml,
     build_callback_phone_twiml,
     build_goodbye_hangup_twiml,
+    build_name_ask_twiml,
 )
 
 db = firestore.Client()
@@ -415,12 +416,12 @@ async def process(
         save_message(CallSid, "user", speech_result)
         if not _is_refusal(speech_result):
             new_anliegen = pending.get("anliegen", "") + " Ergänzung: " + speech_result
-            update_pending_contact(CallSid, anliegen=new_anliegen.strip(), stage="kontakt")
+            update_pending_contact(CallSid, anliegen=new_anliegen.strip(), stage="name_asked")
         else:
-            update_pending_contact(CallSid, stage="kontakt")
+            update_pending_contact(CallSid, stage="name_asked")
         if lat_logger:
             lat_logger.finish()
-        return Response(content=_build_contact_offer_twiml(), media_type="application/xml")
+        return Response(content=build_name_ask_twiml(), media_type="application/xml")
 
     # Stage: callback_offered — "Möchten Sie stattdessen einen Rückruf?"
     if pending and pending.get("stage") == "callback_offered":
@@ -428,10 +429,10 @@ async def process(
         save_message(CallSid, "user", speech_result)
         if _is_consent(speech_result):
             flagged = "[RÜCKRUF ERWÜNSCHT] " + pending.get("anliegen", "")
-            update_pending_contact(CallSid, stage="kontakt", anliegen=flagged.strip())
+            update_pending_contact(CallSid, stage="name_asked", anliegen=flagged.strip())
             if lat_logger:
                 lat_logger.finish()
-            return Response(content=build_callback_phone_twiml(), media_type="application/xml")
+            return Response(content=build_name_ask_twiml(), media_type="application/xml")
         else:
             get_and_delete_pending_contact(CallSid)
             if lat_logger:
@@ -598,15 +599,43 @@ async def process_contact(
     category = pending["category"]
     stage = pending.get("stage", "kontakt")
 
+    # B0) Name entgegennehmen — vor Refusal-Check, damit "Nein" beim Namen nicht abbricht
+    if stage == "name_asked":
+        logger.info("[PROCESS_CONTACT] Stage=name_asked | Speech='%s' | CallSid=%s", SpeechResult, CallSid)
+        save_message(CallSid, "user", SpeechResult)
+        caller_name = SpeechResult.strip() if not _is_refusal(SpeechResult) else ""
+        update_pending_contact(CallSid, caller_name=caller_name, stage="kontakt")
+        if caller_name:
+            name_safe = (
+                caller_name
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            msg = f"Danke, {name_safe}. Wie lautet Ihre Rückrufnummer?"
+        else:
+            msg = "Wie lautet Ihre Rückrufnummer?"
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="/call/process_contact" method="POST"
+          language="de-DE" speechTimeout="7">
+    <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
+  </Gather>
+  <Redirect method="POST">/call/process_contact</Redirect>
+</Response>"""
+        return Response(content=twiml, media_type="application/xml")
+
     # B) Ablehnung erkennen → Durchwahl nennen (Schritt 3b)
     if _is_refusal(SpeechResult):
         logger.info("[PROCESS_CONTACT] Ablehnung erkannt, nenne Durchwahl. CallSid=%s", CallSid)
+        caller_name = pending.get("caller_name", "")
+        name_suffix = f", {caller_name}" if caller_name else ""
         get_and_delete_pending_contact(CallSid)
         team_name, ext_words = _CATEGORY_EXTENSIONS.get(category, ("dem Support-Team", ""))
         if ext_words:
-            msg = f"Kein Problem. Sie erreichen {team_name} direkt unter Durchwahl {ext_words}. Auf Wiederhören."
+            msg = f"Kein Problem{name_suffix}. Sie erreichen {team_name} direkt unter Durchwahl {ext_words}. Auf Wiederhören."
         else:
-            msg = f"Kein Problem. Bitte wenden Sie sich direkt an {team_name}. Auf Wiederhören."
+            msg = f"Kein Problem{name_suffix}. Bitte wenden Sie sich direkt an {team_name}. Auf Wiederhören."
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say language="de-DE" voice="Google.de-DE-Neural2-F">{msg}</Say>
@@ -636,6 +665,8 @@ async def process_contact(
             logger.info("[PROCESS_CONTACT] Kein Extrakt — Fallback auf Twilio-Nummer: %s", fallback)
 
     # F) Pending löschen und E-Mail senden
+    caller_name = pending.get("caller_name", "")
+    name_suffix = f", {caller_name}" if caller_name else ""
     get_and_delete_pending_contact(CallSid)
     anliegen = pending.get("anliegen") or pending.get("speech_result", "")
     history = get_history(CallSid)
@@ -648,6 +679,7 @@ async def process_contact(
         caller_contact=caller_contact,
         recipient_override=pending.get("person_email") or None,
         team_name_override=pending.get("person_name") or None,
+        caller_name=caller_name,
     )
 
     # G) Bestätigung + Verabschiedung (Email vs. Rückruf)
@@ -657,19 +689,19 @@ async def process_contact(
             pb_anrede = pending.get("person_anrede", "")
             pb_last = (pending.get("person_name", "").split(",")[0].strip()) if pending.get("person_name") else ""
             pb_addressed = f"{pb_anrede} {pb_last}".strip() if (pb_anrede and pb_last) else (pb_last or "die zuständige Person")
-            farewell_msg = f"Vielen Dank. {pb_addressed} wird sich in Kürze bei Ihnen melden. Auf Wiederhören!"
+            farewell_msg = f"Vielen Dank. {pb_addressed} wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!"
         else:
             _CALLBACK_FAREWELL = {
-                "erp":        "Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-                "evs":        "Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-                "hr":         "Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-                "it":         "Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-                "verwaltung": "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
-                "nachricht":  "Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören!",
+                "erp":        f"Vielen Dank. Der ERP-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!",
+                "evs":        f"Vielen Dank. Der EVS-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!",
+                "hr":         f"Vielen Dank. Der HR-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!",
+                "it":         f"Vielen Dank. Der IT-Support wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!",
+                "verwaltung": f"Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!",
+                "nachricht":  f"Vielen Dank. Herr Müller wird sich in Kürze bei Ihnen melden. Auf Wiederhören{name_suffix}!",
             }
-            farewell_msg = _CALLBACK_FAREWELL.get(category, "Vielen Dank. Es wird sich jemand bei Ihnen melden. Auf Wiederhören!")
+            farewell_msg = _CALLBACK_FAREWELL.get(category, f"Vielen Dank. Es wird sich jemand bei Ihnen melden. Auf Wiederhören{name_suffix}!")
     else:
-        farewell_msg = "Vielen Dank für Ihren Anruf. Ich wünsche Ihnen noch einen schönen Tag. Auf Wiederhören!"
+        farewell_msg = f"Vielen Dank für Ihren Anruf. Ich wünsche Ihnen noch einen schönen Tag. Auf Wiederhören{name_suffix}!"
     save_message(CallSid, "assistant", farewell_msg)
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>

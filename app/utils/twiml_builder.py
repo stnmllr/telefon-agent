@@ -176,6 +176,13 @@ def build_callback_phone_twiml() -> str:
     return _build_gather("Wie lautet Ihre Rückrufnummer?", "/call/process_contact")
 
 
+def build_name_ask_twiml() -> str:
+    return _build_gather(
+        "Darf ich kurz Ihren Namen notieren? Bei schwierigeren Namen buchstabieren Sie ihn bitte kurz.",
+        "/call/process_contact",
+    )
+
+
 def build_goodbye_hangup_twiml() -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>

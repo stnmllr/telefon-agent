@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from app.routers import call_router
 from app.routers import app_router          # NEU
+from app.routers import tools_router      # NEU
 from app.config import settings
 
 logging.basicConfig(
@@ -34,6 +35,7 @@ app = FastAPI(
 
 app.include_router(call_router.router, tags=["Telephonie"])
 app.include_router(app_router.router, tags=["PWA"])      # NEU
+app.include_router(tools_router.router, tags=["Tools"])   # NEU
 
 
 @app.get("/health")
