@@ -1,4 +1,4 @@
-# KI-Telefon-Agent — Projektstand 27.04.2026
+# KI-Telefon-Agent — Projektstand 22.06.2026
 
 ## Infrastruktur
 
@@ -239,6 +239,15 @@ Dienstreise: "Herr Müller ist auf Dienstreise und ab [Datum] wieder erreichbar.
 Budget-Alert: €15/Monat ✅
 
 ## Änderungshistorie
+
+### 22.06.2026
+- **Architektur-Pivot auf ElevenLabs Agents:** Voice-Loop + Reasoning wandern zu
+  ElevenLabs (managed). Dieses Repo liefert künftig nur noch ein transport-agnostisches
+  Tool-Backend (Cloud Run): Endpoints lookup_phonebook / check_absence / send_email /
+  create_ticket + pure Logic-Kerne + pytest + Playbook-YAML. Der bestehende Twilio-/
+  TwiML-/Vertex-AI-Search-Stack (call_router, twiml_builder, rag_service) bleibt vorerst
+  unangetastet und deploybar, bis ElevenLabs produktiv ist. Spec:
+  docs/superpowers/specs/2026-06-22-elevenlabs-tool-backend-design.md
 
 ### 27.04.2026
 - **Anrede bei Telefonbuch-Nennungen:** telefonbuch.csv hat neue Spalte `Anrede` (Herr/Frau); Sofia sagt jetzt "Herr Schindler" statt "Schindler"

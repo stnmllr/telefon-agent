@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # Latenz-Logging
     latency_logging: bool = False
 
+    # Tool-Backend (ElevenLabs Server-Tools)
+    tool_auth_token: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
