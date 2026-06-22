@@ -35,6 +35,7 @@ async def send_routing_email(
     caller_contact: dict | None = None,
     recipient_override: str | None = None,
     team_name_override: str | None = None,
+    caller_name: str = "",
 ) -> bool:
     """
     Sendet eine Benachrichtigungs-E-Mail nach Anruf-Weiterleitung.
@@ -86,6 +87,7 @@ async def send_routing_email(
         subject = f"[KI-Agent] Anruf von {caller_number} — {category_label}"
 
     callback_note = "\n*** RÜCKRUF ERBETEN — bitte den Anrufer zurückrufen ***\n" if is_callback else ""
+    name_line = f"Name:       {caller_name}\n" if caller_name else ""
     body = f"""Hallo {team_name},
 {callback_note}
 der KI-Telefon-Agent hat einen Anruf weitergeleitet, der Ihr Team betrifft.
@@ -94,7 +96,7 @@ der KI-Telefon-Agent hat einen Anruf weitergeleitet, der Ihr Team betrifft.
 ANRUF-DETAILS
 ─────────────────────────────────────────
 Anrufer:    {caller_number}
-Rückruf:    {display_phone}
+{name_line}Rückruf:    {display_phone}
 Zeitpunkt:  {now}
 Kategorie:  {category_label}
 Call-SID:   {call_sid or '—'}
@@ -115,6 +117,10 @@ KI-Telefon-Agent — SOPRA System GmbH
         '&#128222; RÜCKRUF ERBETEN — bitte den Anrufer zurückrufen'
         '</div>'
     ) if is_callback else ""
+    name_row = (
+        f'<tr><td style="padding:6px 0;color:#888;width:120px">Anrufer-Name</td>'
+        f'<td style="padding:6px 0;font-weight:bold">{caller_name}</td></tr>'
+    ) if caller_name else ""
 
     html_body = f"""
 <html><body style="font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto">
@@ -130,6 +136,7 @@ KI-Telefon-Agent — SOPRA System GmbH
   <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
     <tr><td style="padding:6px 0;color:#888;width:120px">Anrufer</td>
         <td style="padding:6px 0;font-weight:bold">{caller_number}</td></tr>
+    {name_row}
     <tr><td style="padding:6px 0;color:#888">Rückruf</td>
         <td style="padding:6px 0">{display_phone}</td></tr>
     <tr><td style="padding:6px 0;color:#888">Zeitpunkt</td>
