@@ -50,7 +50,7 @@ app/
 │   ├── recipients.py        ← DEFAULT_ROUTING + resolve_recipient(category, map) + validate_override(email)  (pure)
 │   └── tickets.py           ← format_ticket_id(year, seq) -> str   (pure)
 ├── services/                ← bleibt; email_service / absence_service werden wiederverwendet
-│   └── routing_config.py    ← NEU: lädt Firestore config/routing, merged über DEFAULT_ROUTING (I/O + Cache)
+│   └── routing_config.py    ← NEU: lädt Firestore config/routing frisch, merged über DEFAULT_ROUTING (I/O, KEIN Cache)
 ├── static/index.html        ← bleibt; ERWEITERT um Settings-Sektion (Empfänger editieren)
 └── playbooks/               ← NEU
     ├── README.md            ← Schema-Doku (Abschnitt 7)
@@ -203,10 +203,22 @@ Code-Defaults (zentral in `recipients.py`, entspricht heutiger `email_service.CA
 Die Empfänger sind **über die PWA editierbar**, ohne Deploy:
 - **Firestore-Doc `config/routing`** hält `{ category: email }`-Overrides. Beim Auflösen werden
   Code-Defaults geladen und mit den Firestore-Overrides **gemergt** (Override gewinnt). Eine fehlende
-  oder leere `config/routing` → reine Defaults. Map wird im Endpoint geladen (kurzlebiger In-Prozess-Cache).
+  oder leere `config/routing` → reine Defaults.
+- **Kein In-Prozess-Cache:** Cloud Run ist mehrinstanzig + scale-to-zero — ein Cache würde nach einem
+  PUT auf warmen Instanzen stale bleiben („Edit wirkt nicht"-Bug). Bei ~1.050 Calls/Jahr ist ein
+  Firestore-Read pro `send_email`/`create_ticket` vernachlässigbar → **Map wird pro Call frisch geladen**,
+  Edit wirkt sofort.
+- **Merge-Semantik (defensiv):**
+  - Überschreibbar sind nur die echten Kategorien; **`phonebook` ist ausgeschlossen** (override-only,
+    kein Default-Empfänger).
+  - **Unbekannte Keys** in `config/routing` werden beim Merge **ignoriert**.
+  - Ein **leeres Override** (`""`) fällt auf den **Code-Default** zurück, statt an `""` zu senden —
+    schützt vor versehentlichem Leeren (die Format-Prüfung beim Speichern fängt nur Tippfehler).
 - **PWA-Erweiterung** der bestehenden Abwesenheits-App (`app_router.py` + `static/index.html`):
   - `GET /app/api/routing` → aktuelle effektive Map (Defaults + Overrides).
-  - `PUT /app/api/routing` → speichert Overrides nach `config/routing`.
+  - `PUT /app/api/routing` → speichert Overrides nach `config/routing`; schreibt zusätzlich einen
+    leichten Audit-Eintrag (`tool_audit`, tool=`routing_change`: geänderte Kategorie, alt→neu, Zeit) —
+    bei Single-Admin geringe Priorität, aber macht Empfänger-Umstellungen nachvollziehbar.
   - Beide hinter der bestehenden Google-OAuth-Session (nur `ALLOWED_EMAIL`).
   - Neue Settings-Sektion im PWA-Frontend: Liste aller Kategorien mit editierbarem Empfänger-Feld.
 - **Validierung beim Speichern:** Eingegebene Empfänger müssen Pflicht-Format E-Mail erfüllen
@@ -226,6 +238,7 @@ Die Empfänger sind **über die PWA editierbar**, ohne Deploy:
    - exakter Nachname; kein Treffer; NFC/Umlaut-Test (Bär, Müller, Zöscher); Team-Zeilen ohne E-Mail.
 3. `absence.build_sofia_text` — alle 4 Typen; Windows-Datumsformat (kein `%-d`-Crash); Meeting-Uhrzeit.
 4. `recipients` — `resolve_recipient` je Kategorie inkl. `fibu`; Firestore-Override gewinnt über Default;
+   **leeres Override → Default** (nicht `""`); **unbekannter Key → ignoriert**; `phonebook` nicht überschreibbar;
    `validate_override` gültig / halluziniert / leere CSV-Mail.
 5. `tickets.format_ticket_id` — Nullpadding, Jahr.
 6. **Endpoint-Tests** (gemockt): Auth-401; Recipient-Guard-422; **atomare Idempotenz** (2. Call mit
