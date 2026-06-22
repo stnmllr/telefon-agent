@@ -60,3 +60,14 @@ async def test_save_overrides(monkeypatch):
     monkeypatch.setattr(routing_config, "_db", lambda: _FakeDB(_DocRef(store)))
     await routing_config.save_overrides({"hr": "neu@x.de"})
     assert store["data"] == {"erp": "alt@x.de", "hr": "neu@x.de"}
+
+
+@pytest.mark.asyncio
+async def test_replace_overrides_removes_old_keys(monkeypatch):
+    """FIX 2: replace_overrides uses merge=False so removed keys are truly gone."""
+    store = {"data": {"erp": "alt@x.de", "hr": "hr@x.de"}}
+    monkeypatch.setattr(routing_config, "_db", lambda: _FakeDB(_DocRef(store)))
+    # Replace with only hr — erp must disappear
+    await routing_config.replace_overrides({"hr": "neu@x.de"})
+    assert store["data"] == {"hr": "neu@x.de"}
+    assert "erp" not in store["data"]

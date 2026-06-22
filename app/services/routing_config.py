@@ -26,3 +26,8 @@ async def load_overrides() -> dict:
 
 async def save_overrides(overrides: dict) -> None:
     await _db().collection("config").document("routing").set(overrides, merge=True)
+
+
+async def replace_overrides(overrides: dict) -> None:
+    """Persist overrides with REPLACE semantics (merge=False) so removed keys are deleted."""
+    await _db().collection("config").document("routing").set(overrides, merge=False)

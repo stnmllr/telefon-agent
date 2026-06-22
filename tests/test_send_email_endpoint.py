@@ -72,3 +72,14 @@ def test_send_email_idempotent_duplicate_skips_send(client, monkeypatch):
     assert r.status_code == 200
     assert r.json()["message_id"] == "old"
     assert client._sent == []   # kein erneuter Versand
+
+
+def test_send_email_in_progress_returns_409(client, monkeypatch):
+    """FIX 1: concurrent retry with in_progress dup must return 409, not re-send."""
+    async def _in_progress(call_id, tool):
+        return {"status": "in_progress"}
+    monkeypatch.setattr(tools_router, "reserve", _in_progress)
+    r = client.post("/tools/send_email", headers=_h(), json={
+        "category": "erp", "subject": "S", "body": "B", "call_id": "C2"})
+    assert r.status_code == 409
+    assert client._sent == []   # no send must have occurred

@@ -127,9 +127,11 @@ async def _resolve_recipient(req: "SendEmailReq") -> str:
 @router.post("/send_email", dependencies=[Depends(require_tool_token)])
 async def send_email(req: SendEmailReq):
     dup = await reserve(req.call_id, "send_email")
-    if dup and dup.get("status") == "done":
-        return {"sent": dup.get("email_sent", True), "recipient": dup.get("recipient"),
-                "message_id": dup.get("message_id"), "ticket_ref": req.ticket_ref}
+    if dup is not None:
+        if dup.get("status") == "done":
+            return {"sent": dup.get("email_sent", True), "recipient": dup.get("recipient"),
+                    "message_id": dup.get("message_id"), "ticket_ref": req.ticket_ref}
+        raise HTTPException(status_code=409, detail="request already being processed")
 
     recipient = await _resolve_recipient(req)
     ok, message_id = await email_service.send_email_raw(
@@ -174,9 +176,11 @@ class CreateTicketReq(BaseModel):
 @router.post("/create_ticket", dependencies=[Depends(require_tool_token)])
 async def create_ticket(req: CreateTicketReq):
     dup = await reserve(req.call_id, "create_ticket")
-    if dup and dup.get("status") == "done":
-        return {"created": True, "ticket_id": dup.get("ticket_id"),
-                "email_sent": dup.get("email_sent", False)}
+    if dup is not None:
+        if dup.get("status") == "done":
+            return {"created": True, "ticket_id": dup.get("ticket_id"),
+                    "email_sent": dup.get("email_sent", False)}
+        raise HTTPException(status_code=409, detail="request already being processed")
 
     year = datetime.now(timezone.utc).year
     seq = await next_ticket_seq()
@@ -198,5 +202,5 @@ async def create_ticket(req: CreateTicketReq):
 
     await finalize(req.call_id, "create_ticket", ticket_id=ticket_id,
                    recipient=recipient, message_id=message_id, email_sent=ok,
-                   category=req.category)
+                   category=req.category, caller_number=req.caller_number)
     return {"created": True, "ticket_id": ticket_id, "email_sent": ok}

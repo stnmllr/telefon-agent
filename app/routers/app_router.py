@@ -242,19 +242,22 @@ async def get_routing(email: str = Depends(require_auth)):
 
 @router.put("/api/routing")
 async def put_routing(body: RoutingUpdate, email: str = Depends(require_auth)):
-    overrides = {}
-    current = recipients.merge_routing(await routing_config.load_overrides())
+    current_effective = recipients.merge_routing(await routing_config.load_overrides())
+    # Start from the currently stored overrides so categories absent from the request are kept.
+    desired = dict(await routing_config.load_overrides())
     for category, addr in body.routing.items():
         if category not in recipients.DEFAULT_ROUTING:
             continue   # unbekannte Keys / phonebook ignorieren
         addr = (addr or "").strip()
         if not addr:
-            continue   # leer -> Default behalten
+            # Empty value → remove the override (revert to default)
+            desired.pop(category, None)
+            continue
         if not _EMAIL_RE.match(addr):
             raise HTTPException(status_code=422, detail=f"ungültige E-Mail: {addr}")
-        if addr != current.get(category):
-            _audit_routing_change(category, current.get(category, ""), addr)
-        overrides[category] = addr
-    await routing_config.save_overrides(overrides)
+        if addr != current_effective.get(category):
+            _audit_routing_change(category, current_effective.get(category, ""), addr)
+        desired[category] = addr
+    await routing_config.replace_overrides(desired)
     return {"success": True, "routing": recipients.merge_routing(
         await routing_config.load_overrides())}

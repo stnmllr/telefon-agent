@@ -63,3 +63,56 @@ def test_create_ticket_partial_fail_email(client, monkeypatch):
     body = r.json()
     assert body["created"] is True          # Ticket gilt trotzdem als erstellt
     assert body["email_sent"] is False      # Mail fehlgeschlagen
+
+
+def test_create_ticket_in_progress_returns_409(client, monkeypatch):
+    """FIX 1: concurrent retry with in_progress dup must return 409."""
+    seq_calls = []
+    saved_calls = []
+
+    async def _in_progress(call_id, tool):
+        return {"status": "in_progress"}
+    monkeypatch.setattr(tools_router, "reserve", _in_progress)
+
+    async def _seq():
+        seq_calls.append(1)
+        return 99
+    monkeypatch.setattr(tools_router, "next_ticket_seq", _seq)
+
+    async def _save(record):
+        saved_calls.append(record)
+    monkeypatch.setattr(tools_router, "save_ticket", _save)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "erp", "summary": "X", "call_id": "C3"})
+    assert r.status_code == 409
+    assert seq_calls == []   # next_ticket_seq must NOT have been called
+    assert saved_calls == []  # save_ticket must NOT have been called
+
+
+def test_create_ticket_done_duplicate_skips_creation(client, monkeypatch):
+    """M4: reserve returns done dup -> return cached ticket_id, no seq/save."""
+    seq_calls = []
+    saved_calls = []
+
+    async def _done_dup(call_id, tool):
+        return {"status": "done", "ticket_id": "SOF-2026-000042", "email_sent": True}
+    monkeypatch.setattr(tools_router, "reserve", _done_dup)
+
+    async def _seq():
+        seq_calls.append(1)
+        return 99
+    monkeypatch.setattr(tools_router, "next_ticket_seq", _seq)
+
+    async def _save(record):
+        saved_calls.append(record)
+    monkeypatch.setattr(tools_router, "save_ticket", _save)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "erp", "summary": "X", "call_id": "C4"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ticket_id"] == "SOF-2026-000042"
+    assert body["email_sent"] is True
+    assert seq_calls == []   # next_ticket_seq must NOT have been called
+    assert saved_calls == []  # save_ticket must NOT have been called
