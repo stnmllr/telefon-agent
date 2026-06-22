@@ -5,6 +5,7 @@ Firestore-Zugriffe sind in kleine, monkeypatchbare Adapter-Funktionen gekapselt.
 """
 import hmac
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Depends
 from pydantic import BaseModel
@@ -12,7 +13,7 @@ from google.cloud import firestore
 from google.api_core import exceptions as gexc
 
 from app.config import settings
-from app.tools import phonebook, recipients
+from app.tools import phonebook, recipients, tickets
 from app.tools.absence import build_sofia_text
 from app.services import routing_config, email_service
 
@@ -139,3 +140,63 @@ async def send_email(req: SendEmailReq):
                    category=req.category, caller_number=req.caller_number)
     return {"sent": ok, "recipient": recipient, "message_id": message_id,
             "ticket_ref": req.ticket_ref}
+
+
+# ── create_ticket ────────────────────────────────────────────
+async def next_ticket_seq() -> int:
+    db = _db()
+    ref = db.collection("counters").document("tickets")
+
+    @firestore.async_transactional
+    async def _txn(txn):
+        snap = await ref.get(transaction=txn)
+        current = (snap.to_dict() or {}).get("seq", 0) if snap.exists else 0
+        nxt = current + 1
+        txn.set(ref, {"seq": nxt}, merge=True)
+        return nxt
+
+    return await _txn(db.transaction())
+
+
+async def save_ticket(record: dict) -> None:
+    await _db().collection("tickets").document(record["ticket_id"]).set(record)
+
+
+class CreateTicketReq(BaseModel):
+    category: str
+    summary: str
+    caller_number: str = ""
+    callback_requested: bool = False
+    priority: str = "normal"
+    call_id: str | None = None
+
+
+@router.post("/create_ticket", dependencies=[Depends(require_tool_token)])
+async def create_ticket(req: CreateTicketReq):
+    dup = await reserve(req.call_id, "create_ticket")
+    if dup and dup.get("status") == "done":
+        return {"created": True, "ticket_id": dup.get("ticket_id"),
+                "email_sent": dup.get("email_sent", False)}
+
+    year = datetime.now(timezone.utc).year
+    seq = await next_ticket_seq()
+    ticket_id = tickets.format_ticket_id(year, seq)
+    # Ticket gilt ab Record-Existenz als erstellt:
+    await save_ticket({
+        "ticket_id": ticket_id, "category": req.category, "summary": req.summary,
+        "caller_number": req.caller_number, "priority": req.priority,
+        "callback_requested": req.callback_requested,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    routing = recipients.merge_routing(await routing_config.load_overrides())
+    recipient = recipients.resolve_recipient(req.category, routing) \
+        or recipients.DEFAULT_ROUTING["verwaltung"]
+    ok, message_id = await email_service.send_email_raw(
+        recipient, f"Ticket {ticket_id}: {req.summary[:60]}", req.summary,
+        ticket_ref=ticket_id, callback=req.callback_requested)
+
+    await finalize(req.call_id, "create_ticket", ticket_id=ticket_id,
+                   recipient=recipient, message_id=message_id, email_sent=ok,
+                   category=req.category)
+    return {"created": True, "ticket_id": ticket_id, "email_sent": ok}
