@@ -41,14 +41,17 @@ deploybar, bis ElevenLabs produktiv ist.
 ```
 app/
 ├── routers/
-│   └── tools_router.py      ← NEU: POST /tools/{lookup_phonebook,check_absence,send_email,create_ticket}
+│   ├── tools_router.py      ← NEU: POST /tools/{lookup_phonebook,check_absence,send_email,create_ticket}
+│   └── app_router.py        ← bleibt; ERWEITERT um GET/PUT /app/api/routing (Empfänger-Config)
 ├── tools/                   ← NEU: transport-agnostische Pure-Logic-Kerne (kein Firestore/HTTP)
 │   ├── phonetik.py          ← koelner_phonetik(s) -> str   (stdlib, ~40 Zeilen)
 │   ├── phonebook.py         ← fuzzy_lookup(name) -> list[Match]   (nur CSV-Read)
 │   ├── absence.py           ← build_sofia_text(absence) -> str   (Windows/Locale-sicher)
-│   ├── recipients.py        ← resolve_recipient(category) + validate_override(email) -> bool
+│   ├── recipients.py        ← DEFAULT_ROUTING + resolve_recipient(category, map) + validate_override(email)  (pure)
 │   └── tickets.py           ← format_ticket_id(year, seq) -> str   (pure)
 ├── services/                ← bleibt; email_service / absence_service werden wiederverwendet
+│   └── routing_config.py    ← NEU: lädt Firestore config/routing, merged über DEFAULT_ROUTING (I/O + Cache)
+├── static/index.html        ← bleibt; ERWEITERT um Settings-Sektion (Empfänger editieren)
 └── playbooks/               ← NEU
     ├── README.md            ← Schema-Doku (Abschnitt 7)
     └── fibu-periode-gesperrt.yaml   ← 1 Beispiel (loesung-Schritte als Platzhalter)
@@ -73,14 +76,20 @@ Jeder **schreibende** Call (`send_email`, `create_ticket`) schreibt nach Firesto
 { tool, ts, call_id, caller_number, category, recipient, ticket_id, email_sent, error }
 ```
 
-### 3.3 Idempotenz (Retry-Schutz)
-ElevenLabs/Netz können Tool-Calls wiederholen → ohne Schutz doppelte E-Mails/Tickets.
-Schreibende Endpoints nehmen `call_id` (ElevenLabs `call_sid`) entgegen. **Vor Ausführung**
-prüft der Endpoint das Audit-Log auf einen erfolgreichen Eintrag mit gleicher (`call_id`, `tool`):
-- Treffer → vorhandenes Ergebnis (z.B. `ticket_id`) zurückgeben, **nicht** erneut ausführen.
-- Kein Treffer → ausführen, dann Audit schreiben.
+### 3.3 Idempotenz (Retry-Schutz, atomar)
+ElevenLabs/Netz können Tool-Calls wiederholen (besonders bei Timeout → ggf. **parallel**) →
+ohne Schutz doppelte E-Mails/Tickets. Ein Check-then-Act (Query → sonst schreiben) hat eine
+Race-Condition: zwei parallele Retries lesen beide „kein Eintrag" und führen beide aus.
 
-Fehlt `call_id` (z.B. Direkttest), wird ohne Dedup ausgeführt (best effort).
+**Atomare Lösung (create-if-not-exists):** Das Audit-Doc bekommt eine **deterministische ID
+`{call_id}:{tool}`** (`:` ist als Firestore-Doc-ID erlaubt; `call_sid` ist safe). Ablauf:
+1. Reservierungs-Doc `tool_audit/{call_id}:{tool}` per `create()` anlegen (schlägt **hart** fehl,
+   wenn es schon existiert — Firestore-Precondition, kein Composite-Index nötig), Status `in_progress`.
+2. Bei Precondition-Fehler → Duplikat: vorhandenes Doc lesen und dessen Ergebnis zurückgeben
+   (bzw. „wird bereits verarbeitet"), **nicht** erneut ausführen.
+3. Sonst: Aktion ausführen, Doc auf Status `done` + Ergebnis (`ticket_id`, `email_sent`, `error`) updaten.
+
+Fehlt `call_id` (z.B. Direkttest), wird mit zufälliger Auto-ID ohne Dedup ausgeführt (best effort).
 
 ---
 
@@ -105,8 +114,13 @@ Alle: `POST`, JSON rein / JSON raus, Header `X-Tool-Token`.
 - Eingabe und CSV-Namens-Tokens werden **NFC-normalisiert + casefold** (Umlaute/ß stabil).
 - Matching via **Kölner Phonetik** (`phonetik.koelner_phonetik`): Query-Tokens (>2 Zeichen) werden
   phonetisch kodiert und gegen die Kölner-Codes der Vor-/Nachnamen jedes CSV-Eintrags verglichen.
-  Code-Gleichheit auf einem Token = Kandidat. Gibt **alle** plausiblen Treffer zurück
-  (z.B. „Stefan" → Bär, Peters **und** Müller, da `8236` kollidiert) → Agent fragt nach.
+- **Ranking nach Token-Treffer-Anzahl** (verhindert Über-Matching bei vollem Namen): Für jeden
+  CSV-Eintrag wird gezählt, wie viele **Query**-Tokens phonetisch matchen.
+  - Matcht mindestens ein Eintrag **alle** Query-Tokens → nur die Maximal-Treffer (alle Tokens)
+    zurückgeben. Bsp.: „Stefan Bär" → **nur Bär** (Bär matcht beide Tokens; Peters/Müller nur den
+    `stefan`-Token `8236`).
+  - Matcht **kein** Eintrag alle Tokens → auf Einzel-Token-Treffer zur Disambiguierung zurückfallen.
+    Bsp.: reine Vornamen-Anfrage „Stefan" → **Bär, Peters und Müller** (`8236` kollidiert) → Agent fragt nach.
 - `Name`-Spalte = „Nachname, Vorname" → in `nachname`/`vorname` aufgesplittet.
 - Team-/Zentrale-Zeilen ohne E-Mail werden mit zurückgegeben (`email: ""`), gelten aber **nie**
   als override-fähig (s. 4.3 Guard).
@@ -127,12 +141,15 @@ die Begrüßung referenziert `{{absence_text}}` im Dashboard-Prompt (Dashboard-C
 - Pure-Core `absence.build_sofia_text(absence)` — **Fix gegenüber Alt-Code:** festes deutsches
   Monats-Array statt `strftime("%-d. %B %Y")` (eliminiert Windows-`%-d`-Crash **und**
   Locale-Abhängigkeit der Monatsnamen). 4 Typen: urlaub/meeting/abwesend/dienstreise.
+- **Graceful Degradation:** Der Endpoint sitzt im Call-Setup-Pfad **vor** der Begrüßung. Bei
+  Firestore-Hänger/Fehler (try/except) liefert er `absence_active="false"` statt den Anrufaufbau
+  zu blockieren. Der Anruf kommt immer zustande; im Fehlerfall begrüßt Sofia ohne Abwesenheitshinweis.
 - Final-Wiring (Webhook in ElevenLabs verdrahten) = Dashboard-Config, out of scope.
 
 ### 4.3 `POST /tools/send_email`
 **Request:**
 ```json
-{ "category": "erp|evs|hr|it|verwaltung|nachricht|phonebook",
+{ "category": "erp|evs|hr|it|verwaltung|nachricht|fibu|phonebook",
   "subject": "string", "body": "string",
   "caller_number": "string", "callback_requested": false,
   "recipient_override": "string|null",
@@ -140,7 +157,9 @@ die Begrüßung referenziert `{{absence_text}}` im Dashboard-Prompt (Dashboard-C
 ```
 **Response:** `{ "sent": true, "recipient": "…@…", "message_id": "…", "ticket_ref": null }`
 
-- `recipients.resolve_recipient(category)` aus der Routing-Map (entspricht heutiger `CATEGORY_EMAILS`).
+- `recipients.resolve_recipient(category, routing_map)` (pure, nimmt die gemergte Map als Argument).
+  Die Map = Code-Defaults überlagert durch Firestore `config/routing` (s. Abschnitt 5). `fibu` ist
+  enthalten (Eskalation einer nicht lösbaren FIBU-Frage; Default = `verwaltung`-Adresse).
 - **Recipient-Guard:** `recipient_override` wird nur akzeptiert, wenn die Adresse **exakt** einer
   **nicht-leeren** E-Mail aus `telefonbuch.csv` entspricht (`recipients.validate_override`).
   Sonst **422**. Verhindert LLM-Halluzination von Adressen.
@@ -165,19 +184,33 @@ die Begrüßung referenziert `{{absence_text}}` im Dashboard-Prompt (Dashboard-C
 
 ---
 
-## 5. Routing-Map (Empfänger-Auflösung)
+## 5. Routing-Map (Empfänger-Auflösung, konfigurierbar)
 
-Unverändert aus dem Bestand (`email_service.CATEGORY_EMAILS`), zentral in `recipients.py`:
+Code-Defaults (zentral in `recipients.py`, entspricht heutiger `email_service.CATEGORY_EMAILS`):
 
-| category   | Empfänger                          |
-|------------|------------------------------------|
-| erp        | erp-support@sopra-system.com       |
-| evs        | evs-support@sopra-system.com       |
-| hr         | hr-support@sopra-system.com        |
-| it         | it-support@sopra-system.com        |
-| verwaltung | Stephan.Mueller@sopra-system.com   |
-| nachricht  | Stephan.Mueller@sopra-system.com   |
-| phonebook  | nur via validiertem `recipient_override` |
+| category   | Default-Empfänger                  | Anmerkung |
+|------------|------------------------------------|-----------|
+| erp        | erp-support@sopra-system.com       | |
+| evs        | evs-support@sopra-system.com       | |
+| hr         | hr-support@sopra-system.com        | |
+| it         | it-support@sopra-system.com        | |
+| verwaltung | Stephan.Mueller@sopra-system.com   | |
+| nachricht  | Stephan.Mueller@sopra-system.com   | |
+| **fibu**   | Stephan.Mueller@sopra-system.com   | **NEU** — Eskalation nicht lösbarer FIBU-Fragen (Normalfall: KB-Auskunft) |
+| phonebook  | — | nur via validiertem `recipient_override` |
+
+### 5.1 Konfigurierbarkeit (Firestore + PWA)
+Die Empfänger sind **über die PWA editierbar**, ohne Deploy:
+- **Firestore-Doc `config/routing`** hält `{ category: email }`-Overrides. Beim Auflösen werden
+  Code-Defaults geladen und mit den Firestore-Overrides **gemergt** (Override gewinnt). Eine fehlende
+  oder leere `config/routing` → reine Defaults. Map wird im Endpoint geladen (kurzlebiger In-Prozess-Cache).
+- **PWA-Erweiterung** der bestehenden Abwesenheits-App (`app_router.py` + `static/index.html`):
+  - `GET /app/api/routing` → aktuelle effektive Map (Defaults + Overrides).
+  - `PUT /app/api/routing` → speichert Overrides nach `config/routing`.
+  - Beide hinter der bestehenden Google-OAuth-Session (nur `ALLOWED_EMAIL`).
+  - Neue Settings-Sektion im PWA-Frontend: Liste aller Kategorien mit editierbarem Empfänger-Feld.
+- **Validierung beim Speichern:** Eingegebene Empfänger müssen Pflicht-Format E-Mail erfüllen
+  (einfache Server-seitige Prüfung). FIBU ist nur eine Zeile dieser Liste — kein Sonderfall im Code.
 
 ---
 
@@ -187,14 +220,19 @@ Unverändert aus dem Bestand (`email_service.CATEGORY_EMAILS`), zentral in `reci
 
 **Reihenfolge (jeweils Test zuerst):**
 1. `phonetik.koelner_phonetik` — stefan/stephan/steffen → gleicher Code; bär/baer; müller/mueller; schindler distinkt.
-2. `phonebook.fuzzy_lookup` — „Stefan" liefert Bär+Peters+Müller (Multi-Match-Regression);
-   exakter Nachname; kein Treffer; NFC/Umlaut-Test (Bär, Müller, Zöscher); Team-Zeilen ohne E-Mail.
+2. `phonebook.fuzzy_lookup` —
+   - reine Vornamen-Anfrage „Stefan" liefert **Bär+Peters+Müller** (Vornamen-Kollisions-Regression);
+   - voller Name „Stefan Bär" liefert **nur Bär** (Token-Ranking-Regression);
+   - exakter Nachname; kein Treffer; NFC/Umlaut-Test (Bär, Müller, Zöscher); Team-Zeilen ohne E-Mail.
 3. `absence.build_sofia_text` — alle 4 Typen; Windows-Datumsformat (kein `%-d`-Crash); Meeting-Uhrzeit.
-4. `recipients` — `resolve_recipient` je Kategorie; `validate_override` gültig / halluziniert / leere CSV-Mail.
+4. `recipients` — `resolve_recipient` je Kategorie inkl. `fibu`; Firestore-Override gewinnt über Default;
+   `validate_override` gültig / halluziniert / leere CSV-Mail.
 5. `tickets.format_ticket_id` — Nullpadding, Jahr.
-6. **Endpoint-Tests** (gemockt): Auth-401; Recipient-Guard-422; Idempotenz-Dedup (2. Call = kein
-   2. Versand); create_ticket Partial-Fail (`created:true`, `email_sent:false`);
-   check_absence-Envelope-Form.
+6. **Endpoint-Tests** (gemockt): Auth-401; Recipient-Guard-422; **atomare Idempotenz** (2. Call mit
+   gleichem `{call_id}:{tool}` = `create()`-Precondition-Fehler → kein 2. Versand, Ergebnis aus
+   vorhandenem Doc); create_ticket Partial-Fail (`created:true`, `email_sent:false`);
+   check_absence-Envelope-Form **+ Graceful Degradation** (Firestore-Fehler → `absence_active="false"`);
+   PWA `GET/PUT /app/api/routing` (Auth + Override-Persistenz).
 
 **Zielabdeckung:** ~95 % auf den Tool-Kernen. Jeder genannte Alt-Bug → Regressionstest.
 
@@ -248,6 +286,15 @@ in v1 — native KB-Grounding zuerst; explizites Tool nur, falls Grounding zu lo
 - L3 Audio-Goldstandard — Phase 2.
 
 ---
+
+## 9a. „Code fertig" ≠ „Sicherheitsverhalten validiert"
+
+Die Eval-Szenarien **#9 (Anti-Halluzination: keine Preisaussage)** und **#14 (Eskalation rechtliche
+Frage → harter Handoff)** hängen am **Dashboard-System-Prompt** und an `transfer_to_number` — beides
+ElevenLabs-Config, kein Repo-Code. Der harte Code-seitige Guard (Tool wird wirklich ausgeführt →
+keine erfundene E-Mail/Ticket; Recipient-Guard) ist Teil dieses Spec. Das **Antwort-/Eskalations-
+Verhalten** wird aber erst in der **L2-Eval gegen den konfigurierten Agenten** validiert. Abschluss
+des Phase-1-Codes bedeutet daher nicht, dass das Sicherheitsverhalten bereits abgenommen ist.
 
 ## 10. Offene Klärungen (Business/Dashboard — blockieren den Code nicht)
 
