@@ -8,8 +8,6 @@ import logging
 from datetime import datetime
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-from app.services.rag_service import summarize_conversation
-
 logger = logging.getLogger(__name__)
 
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
@@ -71,6 +69,7 @@ async def send_routing_email(
     digits = "".join(c for c in extracted_phone if c.isdigit())
     display_phone = extracted_phone if len(digits) >= 6 else f"{caller_number} (Anrufer-Nummer)"
 
+    from app.services.rag_service import summarize_conversation
     summary = await summarize_conversation(conversation_history)
 
     category_label = {
@@ -179,3 +178,48 @@ KI-Telefon-Agent — SOPRA System GmbH
     except Exception as e:
         logger.error("E-Mail senden fehlgeschlagen: %s", e)
         return False
+
+
+async def send_email_raw(
+    recipient_email: str,
+    subject: str,
+    plain_body: str,
+    ticket_ref: str | None = None,
+    callback: bool = False,
+) -> tuple[bool, str]:
+    """Versendet eine vom Agenten formulierte E-Mail direkt (ohne RAG-Summary).
+
+    Returns (ok, message_id).
+    """
+    if not SENDGRID_API_KEY:
+        logger.warning("SENDGRID_API_KEY nicht gesetzt — E-Mail wird nicht gesendet")
+        return False, ""
+
+    full_subject = f"[{ticket_ref}] {subject}" if ticket_ref else subject
+    callback_note = "\n*** RÜCKRUF ERBETEN ***\n" if callback else ""
+    plain = f"{callback_note}{plain_body}\n\n— Sofia, digitaler Assistent von Stephan Müller"
+    html = (
+        '<html><body style="font-family:Arial,sans-serif;color:#333">'
+        + ('<div style="background:#c0392b;color:#fff;padding:8px 16px;font-weight:bold">'
+           '&#128222; RÜCKRUF ERBETEN</div>' if callback else "")
+        + f'<div style="padding:16px;white-space:pre-wrap">{plain_body}</div>'
+        '<p style="font-size:12px;color:#888;padding:0 16px">'
+        'Automatisch von Sofia generiert.</p></body></html>'
+    )
+    try:
+        message = Mail(
+            from_email=(EMAIL_FROM, EMAIL_FROM_NAME),
+            to_emails=recipient_email,
+            subject=full_subject,
+            plain_text_content=plain,
+            html_content=html,
+        )
+        response = SendGridAPIClient(SENDGRID_API_KEY).send(message)
+        ok = response.status_code in (200, 202)
+        message_id = response.headers.get("X-Message-Id", "") if ok else ""
+        if not ok:
+            logger.error("SendGrid Fehler: Status %d", response.status_code)
+        return ok, message_id
+    except Exception as e:
+        logger.error("send_email_raw fehlgeschlagen: %s", e)
+        return False, ""
