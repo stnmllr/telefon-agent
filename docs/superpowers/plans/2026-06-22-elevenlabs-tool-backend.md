@@ -98,10 +98,11 @@ uv run python -m pytest
 Endpoint-Schutz den direkten `pytest.exe`-Entrypoint (wie bei FisherScreen). Der
 Aufruf über `python -m pytest` umgeht den blockierten Entrypoint.
 
-Einmalig die Umgebung aufsetzen:
+Einmalig die Umgebung aufsetzen (Python 3.12 wie in der Production/Dockerfile —
+System-Python 3.14 hat keine Wheels für langchain/aiplatform):
 
 ```
-uv venv
+uv venv --python 3.12
 uv pip install -r requirements.txt
 ```
 
@@ -119,11 +120,13 @@ Pivot auf ElevenLabs Agents; dieses Repo liefert das Tool-Backend.
 
 Run:
 ```
-uv venv
+uv venv --python 3.12
 uv pip install -r requirements.txt
 uv run python -m pytest tests/ -v
 ```
-Expected: bestehende Tests in `tests/test_twiml.py` PASS (4 passed).
+Expected: bestehende Tests in `tests/test_twiml.py` PASS (4 passed). Falls `uv pip install`
+einzelne schwere Deps nicht bauen kann, prüfen ob `uv` das Managed-CPython 3.12 nutzt
+(`uv run python --version` → 3.12.x).
 
 - [ ] **Step 8: PROJEKTSTAND.md — Architektur-Pivot vermerken**
 
