@@ -1,0 +1,22 @@
+- id: fibu-periode-gesperrt
+  title: "Buchung nicht möglich – Periode gesperrt"
+  area: FIBU
+  trigger:
+    - "kann nicht buchen"
+    - "Periode ist gesperrt"
+    - "Buchung wird abgelehnt"
+  diagnose:
+    - "Welcher Buchungsmonat bzw. welche Periode betrifft es?"
+    - "Erscheint eine konkrete Fehlermeldung? Wenn ja, welche genau?"
+  loesung:
+    - "<<aus Handbuch/Fachwissen befüllen – z. B. Pfad zur Periodenverwaltung>>"
+    - "<<Schritt 2 – aus Handbuch befüllen>>"
+  verifikation:
+    - "Bitten Sie den Anrufer, die Buchung erneut zu versuchen."
+  eskalation:
+    - bedingung: "Anrufer hat keine Berechtigung zum Entsperren"
+      aktion: transfer
+    - bedingung: "Fehlermeldung deutet auf Datenbank-/Integritätsproblem"
+      aktion: ticket_hoch
+  handbuch_refs:
+    - "ProFI FIBU – Periodenverwaltung"
