@@ -20,6 +20,8 @@ from app.services.absence_service import (
     get_all_absences,
     delete_absence,
 )
+from app.tools import recipients
+from app.services import routing_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/app")
@@ -209,3 +211,50 @@ async def auth_me(request: Request):
     if not email:
         return JSONResponse({"authenticated": False}, status_code=401)
     return {"authenticated": True, "email": email}
+
+
+# ── Routing-Config API ───────────────────────────────────────
+
+_EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _audit_routing_change(category: str, old: str, new: str) -> None:
+    """Leichtes Audit einer Empfänger-Umstellung."""
+    try:
+        _db.collection("tool_audit").add({
+            "tool": "routing_change", "category": category,
+            "old": old, "new": new,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        logger.warning("routing_change-Audit fehlgeschlagen: %s", exc)
+
+
+class RoutingUpdate(BaseModel):
+    routing: dict
+
+
+@router.get("/api/routing")
+async def get_routing(email: str = Depends(require_auth)):
+    overrides = await routing_config.load_overrides()
+    return {"routing": recipients.merge_routing(overrides)}
+
+
+@router.put("/api/routing")
+async def put_routing(body: RoutingUpdate, email: str = Depends(require_auth)):
+    overrides = {}
+    current = recipients.merge_routing(await routing_config.load_overrides())
+    for category, addr in body.routing.items():
+        if category not in recipients.DEFAULT_ROUTING:
+            continue   # unbekannte Keys / phonebook ignorieren
+        addr = (addr or "").strip()
+        if not addr:
+            continue   # leer -> Default behalten
+        if not _EMAIL_RE.match(addr):
+            raise HTTPException(status_code=422, detail=f"ungültige E-Mail: {addr}")
+        if addr != current.get(category):
+            _audit_routing_change(category, current.get(category, ""), addr)
+        overrides[category] = addr
+    await routing_config.save_overrides(overrides)
+    return {"success": True, "routing": recipients.merge_routing(
+        await routing_config.load_overrides())}
