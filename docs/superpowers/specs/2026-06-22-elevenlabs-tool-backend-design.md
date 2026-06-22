@@ -2,7 +2,7 @@
 
 **Datum:** 2026-06-22
 **Branch (geplant):** `refactor/elevenlabs-phase-1` (von `migrate/gemini-2.5-flash`)
-**Status:** Design freigegeben (mit Review-Korrekturen), Implementierungsplan folgt via writing-plans.
+**Status:** Phase-1-Code implementiert (pytest grün). Dashboard-Config + L2-Eval offen.
 
 ---
 
