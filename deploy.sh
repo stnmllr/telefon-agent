@@ -27,7 +27,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --cpu 2 \
   --timeout 30 \
   --set-env-vars "ENVIRONMENT=production,GCP_PROJECT_ID=${PROJECT_ID},GCP_LOCATION=${REGION}" \
-  --set-secrets "TWILIO_AUTH_TOKEN=twilio-auth-token:latest,TWILIO_ACCOUNT_SID=twilio-account-sid:latest"
+  --set-secrets "TWILIO_AUTH_TOKEN=twilio-auth-token:latest,TWILIO_ACCOUNT_SID=twilio-account-sid:latest,TOOL_AUTH_TOKEN=tool-auth-token:latest"
 
 echo ""
 echo "✅ Deployment abgeschlossen!"
