@@ -240,6 +240,41 @@ Budget-Alert: €15/Monat ✅
 
 ## Änderungshistorie
 
+### 25.06.2026
+- **KB-Migration FIBU: PDF -> Markdown.** Neues Build-Tool `kb_convert`
+  (`uv run python -m kb_convert`) wandelt die FIBU-Handbücher aus `c:\profi\Doku`
+  in bereinigtes Markdown für die native ElevenLabs Knowledge Base (KB-Limit 20 MB
+  hochgeladene Dateigröße auf Nicht-Enterprise-Tarifen; ElevenLabs indexiert nur
+  extrahierten Text — daher Markdown statt PDF: ~30 MB PDF → 3.2 MB Text).
+  - **Scope: NUR FIBU. ERP komplett raus** (inkl. kundenspezifischer Schnittstellendateien).
+  - Engine: `pymupdf4llm` (Markdown inkl. Tabellen); `pymupdf-layout`/OCR bewusst
+    deinstalliert (Handbücher haben echte Textebene → 23× schneller, ~3 s/Datei).
+    Fallback `markitdown` vorgesehen (nicht installiert, da nicht gebraucht).
+  - **Beide Libs sind Build-Tooling, NICHT in requirements.txt** (kein Cloud-Run-Runtime).
+  - Pure-Logic-Kern `kb_convert/core.py` (slugify / Scan-Heuristik / Boilerplate-
+    Bereinigung / Report) TDD-getestet: 26 Tests, Suite gesamt 85 grün.
+  - Ergebnis: `./kb_fibu/` (9 Pflicht-Handbücher, **3.22 MB**) + `./kb_fibu/optional/`
+    (4 Stück, 0.09 MB) + `./kb_fibu/REPORT.md`. **Keine gescannten Dateien**, alles
+    unter 20 MB verifiziert.
+  - **Stichprobe (25.06.):** alle 13 Markdowns geprüft — sauber (0 `(cid:)`-Müll,
+    0 Encoding-Fehler, 0 kollabierte Tabellen, keine Scans). Kleine kosmetische
+    Schwäche: an früheren PDF-Zeilenumbrüchen kleben vereinzelt Wörter zusammen
+    (z.B. „SWIFTAdresse") — für semantische KB-Suche unkritisch, bewusst gelassen.
+  - **Upload-Tool `kb_upload`** (`uv run python -m kb_upload`): lädt die Markdowns
+    als **Text-Dokumente** in die ElevenLabs KB (verifizierter Endpoint
+    `POST /v1/convai/knowledge-base/text`; `.md` ist KEIN offizieller Datei-Upload-Typ,
+    daher Text-Endpoint statt Datei). Manifest `kb_fibu/upload_manifest.json` für Idempotenz, `--dry-run`,
+    `--optional`, `--force`. Key via `ELEVENLABS_API_KEY` (.env). Pure-Core 9 TDD-Tests.
+    Dry-Run verifiziert (9 Pflicht, REPORT.md ausgeschlossen).
+  - **UPLOAD ERLEDIGT (25.06.):** Alle **13** Dokumente (9 Pflicht + 4 optional,
+    `--optional`) als Text in die ElevenLabs KB geladen, document_ids im Manifest,
+    server-seitig per List-Endpoint gegengeprüft (13/13, Typ `text`, Namen `FIBU – …`).
+  - **Offen:** (b) — entfällt, optional ist mit hochgeladen; (c) hochgeladene Docs
+    am Agenten verknüpfen + RAG aktivieren — erst sinnvoll, wenn der Agent
+    konfiguriert ist (Doku-URLs für RAG-/Link-API waren am 25.06. teils 404);
+    (d) **Support-Fälle/Playbooks zurückgestellt** — Quelle der definierten Fälle
+    mit Lösungen ist noch zu klären, bevor die Playbook-`loesung` befüllt werden kann.
+
 ### 22.06.2026
 - **Architektur-Pivot auf ElevenLabs Agents:** Voice-Loop + Reasoning wandern zu
   ElevenLabs (managed). Dieses Repo liefert künftig nur noch ein transport-agnostisches
