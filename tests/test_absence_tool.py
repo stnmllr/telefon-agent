@@ -24,3 +24,22 @@ def test_abwesend_default_type():
 def test_invalid_date_graceful():
     txt = build_sofia_text({"type": "urlaub", "end": "kaputt"})
     assert txt == "Herr Müller ist im Urlaub."
+
+
+def test_note_appended_as_vertretung():
+    # Das note-Feld der App (z.B. eine echte Vertretung) wird an Sofias Text angehängt,
+    # damit sie sie NENNEN kann statt eine zu erfinden.
+    txt = build_sofia_text({"type": "urlaub", "end": "2026-07-15",
+                            "note": "Die Vertretung übernimmt Frau Meier."})
+    assert txt == ("Herr Müller ist im Urlaub und ab 15. Juli 2026 wieder erreichbar. "
+                   "Die Vertretung übernimmt Frau Meier.")
+
+
+def test_no_note_no_extra():
+    txt = build_sofia_text({"type": "urlaub", "end": "2026-07-15"})
+    assert txt == "Herr Müller ist im Urlaub und ab 15. Juli 2026 wieder erreichbar."
+
+
+def test_blank_note_ignored():
+    txt = build_sofia_text({"type": "urlaub", "end": "2026-07-15", "note": "   "})
+    assert txt == "Herr Müller ist im Urlaub und ab 15. Juli 2026 wieder erreichbar."

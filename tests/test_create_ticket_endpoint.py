@@ -204,6 +204,32 @@ def test_internal_key_category_does_not_leak_to_kuehn(client, monkeypatch):
     assert captured["kwargs"].get("cc") is None
 
 
+def test_fibu_reroute_uses_config_override_address(client, monkeypatch):
+    """Ein config/routing-Override für fibu_absence (z.B. support@) wird beim
+    Reroute genutzt — nicht der Default kuehn. (Mailfreier Beweis des PWA-Edits.)"""
+    async def _override():
+        return {"fibu_absence": "support@sopra-system.com"}
+    monkeypatch.setattr(routing_config, "load_overrides", _override)
+
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    async def _absent():
+        return {"type": "urlaub", "start": "2026-07-01", "end": "2026-07-31"}
+    monkeypatch.setattr(tools_router, "get_active_absence_safe", _absent)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "fibu", "summary": "X"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "support@sopra-system.com"
+    assert captured["kwargs"]["cc"] == ["Stephan.Mueller@sopra-system.com"]
+
+
 def test_fibu_ticket_normal_when_present(client, monkeypatch):
     captured = {}
 

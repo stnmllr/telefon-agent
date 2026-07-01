@@ -10,6 +10,7 @@ der Authorization-Header.
 """
 
 import os
+import html
 import logging
 from datetime import datetime
 
@@ -243,9 +244,11 @@ async def send_email_raw(
     if header_rows:
         plain_header = "\n".join(f"{label}: {value}" for label, value in header_rows) \
             + "\n" + "─" * 42 + "\n\n"
+        # Nutzer-/LLM-Werte werden im HTML escaped (kein Markup-Bruch/-Injection);
+        # der Plain-Text-Teil oben bleibt bewusst unescaped.
         rows_html = "".join(
-            f'<tr><td style="padding:4px 16px 4px 0;color:#888;white-space:nowrap">{label}</td>'
-            f'<td style="padding:4px 0;font-weight:bold">{value}</td></tr>'
+            f'<tr><td style="padding:4px 16px 4px 0;color:#888;white-space:nowrap">{html.escape(str(label))}</td>'
+            f'<td style="padding:4px 0;font-weight:bold">{html.escape(str(value))}</td></tr>'
             for label, value in header_rows
         )
         html_header = (
@@ -254,13 +257,13 @@ async def send_email_raw(
         )
 
     plain = f"{callback_note}{plain_header}{plain_body}\n\n— Sofia, digitaler Assistent von Stephan Müller"
-    html = (
+    html_out = (
         '<html><body style="font-family:Arial,sans-serif;color:#333">'
         + ('<div style="background:#c0392b;color:#fff;padding:8px 16px;font-weight:bold">'
            '&#128222; RÜCKRUF ERBETEN</div>' if callback else "")
         + f'<div style="padding:16px">{html_header}'
-        + f'<div style="white-space:pre-wrap">{plain_body}</div></div>'
+        + f'<div style="white-space:pre-wrap">{html.escape(plain_body)}</div></div>'
         '<p style="font-size:12px;color:#888;padding:0 16px">'
         'Automatisch von Sofia generiert.</p></body></html>'
     )
-    return await _resend_send(recipient_email, full_subject, html, plain, cc=cc)
+    return await _resend_send(recipient_email, full_subject, html_out, plain, cc=cc)

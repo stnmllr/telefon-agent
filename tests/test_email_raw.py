@@ -85,6 +85,32 @@ async def test_send_email_raw_no_header_rows_unchanged(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_email_raw_escapes_html_in_user_values(monkeypatch):
+    """Nutzer-Werte (caller_name via header_rows, Body) dürfen kein rohes Markup
+    in den HTML-Teil bringen; der Text-Teil bleibt Klartext."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = __import__("json").loads(request.content)
+        return httpx.Response(200, json={"id": "re_e"})
+
+    monkeypatch.setattr(email_service, "RESEND_API_KEY", "re_live_key")
+    monkeypatch.setattr(email_service, "_client", _mock_client(handler))
+
+    await email_service.send_email_raw(
+        "a@b.de", "S", "Body <script>x</script> & mehr",
+        header_rows=[("Anrufer-Name", "Meier <b> & Co")])
+
+    html = captured["json"]["html"]
+    text = captured["json"]["text"]
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "Meier &lt;b&gt; &amp; Co" in html
+    # Plain-Text-Teil bleibt unescaped:
+    assert "Body <script>x</script> & mehr" in text
+
+
+@pytest.mark.asyncio
 async def test_send_email_raw_strips_trailing_whitespace(monkeypatch):
     """Key mit Trailing \\r\\n darf den Authorization-Header NICHT zerstören."""
     captured = {}

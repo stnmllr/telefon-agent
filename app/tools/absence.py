@@ -22,14 +22,18 @@ def build_sofia_text(absence: dict) -> str:
 
     if atype == "meeting":
         time_part = end.split("T")[1][:5] if "T" in end else end
-        if time_part:
-            return f"Herr Müller ist gerade {phrase} und ab {time_part} Uhr wieder erreichbar."
-        return f"Herr Müller ist gerade {phrase}."
+        base = (f"Herr Müller ist gerade {phrase} und ab {time_part} Uhr wieder erreichbar."
+                if time_part else f"Herr Müller ist gerade {phrase}.")
+    else:
+        date_part = end.split("T")[0]
+        try:
+            d = datetime.fromisoformat(date_part)
+            formatted = f"{d.day}. {_MONTHS_DE[d.month]} {d.year}"
+            base = f"Herr Müller ist {phrase} und ab {formatted} wieder erreichbar."
+        except (ValueError, IndexError):
+            base = f"Herr Müller ist {phrase}."
 
-    date_part = end.split("T")[0]
-    try:
-        d = datetime.fromisoformat(date_part)
-        formatted = f"{d.day}. {_MONTHS_DE[d.month]} {d.year}"
-        return f"Herr Müller ist {phrase} und ab {formatted} wieder erreichbar."
-    except (ValueError, IndexError):
-        return f"Herr Müller ist {phrase}."
+    # Das note-Feld der App (z.B. eine echte Vertretung) wird angehängt, damit Sofia
+    # sie NENNEN kann statt eine zu erfinden. Leer/whitespace -> nichts.
+    note = (absence.get("note") or "").strip()
+    return f"{base} {note}" if note else base
