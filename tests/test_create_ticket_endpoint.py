@@ -181,6 +181,29 @@ def test_fibu_ticket_reroutes_to_kuehn_when_absent(client, monkeypatch):
     assert captured["kwargs"]["cc"] == ["Stephan.Mueller@sopra-system.com"]
 
 
+def test_internal_key_category_does_not_leak_to_kuehn(client, monkeypatch):
+    """category='fibu_absence' darf NICHT direkt an Kühn routen (Bypass-Schutz),
+    selbst bei aktiver Abwesenheit — Fallback auf Verwaltung/Stephan."""
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    async def _absent():
+        return {"type": "urlaub", "start": "2026-07-01", "end": "2026-07-31"}
+    monkeypatch.setattr(tools_router, "get_active_absence_safe", _absent)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "fibu_absence", "summary": "Bypass-Versuch"})
+    assert r.status_code == 200
+    assert captured["recipient"] != "kuehn@eevolution.de"
+    assert captured["recipient"] == "Stephan.Mueller@sopra-system.com"
+    assert captured["kwargs"].get("cc") is None
+
+
 def test_fibu_ticket_normal_when_present(client, monkeypatch):
     captured = {}
 

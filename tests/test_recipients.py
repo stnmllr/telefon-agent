@@ -63,3 +63,11 @@ def test_fibu_absence_default_is_kuehn():
 def test_fibu_absence_override_wins():
     merged = merge_routing({"fibu_absence": "neu@extern.de"})
     assert merged["fibu_absence"] == "neu@extern.de"
+
+
+def test_fibu_absence_not_resolvable_as_category():
+    # Interner Reroute-Key darf NIE als Agenten-Kategorie auflösen (sonst Bypass
+    # des Abwesenheits-Checks). Editierbar bleibt er über merge_routing.
+    assert resolve_recipient("fibu_absence", DEFAULT_ROUTING) is None
+    assert resolve_recipient("FIBU_ABSENCE", DEFAULT_ROUTING) is None
+    assert resolve_recipient("  fibu_absence  ", DEFAULT_ROUTING) is None
