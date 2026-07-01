@@ -44,6 +44,7 @@ async def _resend_send(
     subject: str,
     html_body: str,
     text_body: str,
+    cc: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Versendet eine E-Mail über die Resend-API. Returns (ok, message_id)."""
     key = RESEND_API_KEY.strip()
@@ -58,6 +59,8 @@ async def _resend_send(
         "html": html_body,
         "text": text_body,
     }
+    if cc:
+        payload["cc"] = cc
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -223,6 +226,7 @@ async def send_email_raw(
     ticket_ref: str | None = None,
     callback: bool = False,
     header_rows: list[tuple[str, str]] | None = None,
+    cc: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Versendet eine vom Agenten formulierte E-Mail direkt (ohne RAG-Summary).
 
@@ -259,4 +263,4 @@ async def send_email_raw(
         '<p style="font-size:12px;color:#888;padding:0 16px">'
         'Automatisch von Sofia generiert.</p></body></html>'
     )
-    return await _resend_send(recipient_email, full_subject, html, plain)
+    return await _resend_send(recipient_email, full_subject, html, plain, cc=cc)

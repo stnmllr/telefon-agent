@@ -130,6 +130,38 @@ async def test_send_email_raw_no_key(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_email_raw_sets_cc(monkeypatch):
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = __import__("json").loads(request.content)
+        return httpx.Response(200, json={"id": "re_cc"})
+
+    monkeypatch.setattr(email_service, "RESEND_API_KEY", "re_live_key")
+    monkeypatch.setattr(email_service, "_client", _mock_client(handler))
+
+    ok, _ = await email_service.send_email_raw(
+        "to@x.de", "B", "Body", cc=["cc@x.de"])
+    assert ok is True
+    assert captured["json"]["cc"] == ["cc@x.de"]
+
+
+@pytest.mark.asyncio
+async def test_send_email_raw_no_cc_key_when_absent(monkeypatch):
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = __import__("json").loads(request.content)
+        return httpx.Response(200, json={"id": "re_nocc"})
+
+    monkeypatch.setattr(email_service, "RESEND_API_KEY", "re_live_key")
+    monkeypatch.setattr(email_service, "_client", _mock_client(handler))
+
+    await email_service.send_email_raw("to@x.de", "B", "Body")
+    assert "cc" not in captured["json"]
+
+
+@pytest.mark.asyncio
 async def test_send_routing_email_uses_resend_and_category(monkeypatch):
     """Die zweite Sende-Funktion läuft ebenfalls über Resend; Routing nach category."""
     captured = {}
