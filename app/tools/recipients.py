@@ -26,8 +26,14 @@ def merge_routing(overrides: dict | None) -> dict:
 
 
 def resolve_recipient(category: str, routing: dict) -> str | None:
-    """Empfänger für eine Kategorie; `phonebook` ist override-only -> None."""
-    return routing.get(category)
+    """Empfänger für eine Kategorie; `phonebook` ist override-only -> None.
+
+    Case-insensitiv: das ElevenLabs-LLM schickt die Kategorie gern
+    großgeschrieben ("Fibu"), die Routing-Keys sind aber klein.
+    """
+    if not isinstance(category, str):
+        return None
+    return routing.get(category.strip().lower())
 
 
 def validate_override(email: str, valid_emails: set[str]) -> bool:
