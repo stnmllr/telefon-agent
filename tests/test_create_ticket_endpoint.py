@@ -77,6 +77,54 @@ def test_create_ticket_email_carries_header_rows(client, monkeypatch):
     assert "Rückruf" in hr and "Zeitpunkt" in hr
 
 
+def test_create_ticket_recipient_override_routes_to_person(client, monkeypatch):
+    """Nennt der Anrufer eine Person, geht die Mail an DEREN Adresse (aus dem
+    Telefonbuch), nicht ans Kategorie-Team."""
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "it", "summary": "X", "caller_number": "+49",
+        "recipient_override": "Stephan.Mueller@sopra-system.com"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "Stephan.Mueller@sopra-system.com"
+
+
+def test_create_ticket_invalid_override_falls_back_to_category(client, monkeypatch):
+    """Halluzinierte Override-Adresse wird NICHT verwendet -> Kategorie-Route,
+    Ticket trotzdem erstellt."""
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "it", "summary": "X", "recipient_override": "hallu@x.de"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "it-support@sopra-system.com"
+
+
+def test_create_ticket_caller_name_in_header(client, monkeypatch):
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "it", "summary": "X", "caller_name": "Frau Meier, Muster GmbH"})
+    assert r.status_code == 200
+    hr = dict(captured["kwargs"]["header_rows"])
+    assert hr["Anrufer-Name"] == "Frau Meier, Muster GmbH"
+
+
 def test_create_ticket_partial_fail_email(client, monkeypatch):
     async def _send_fail(*a, **k):
         return False, ""

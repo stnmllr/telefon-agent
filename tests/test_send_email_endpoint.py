@@ -41,6 +41,10 @@ def _h():
     return {"X-Tool-Token": "secret"}
 
 
+def _hrows(client):
+    return dict(client._sent[0]["header_rows"])
+
+
 def test_send_email_category_routing(client):
     r = client.post("/tools/send_email", headers=_h(), json={
         "category": "erp", "subject": "S", "body": "B"})
@@ -59,6 +63,14 @@ def test_send_email_includes_caller_header(client):
     hr = dict(client._sent[0]["header_rows"])
     assert hr["Anrufer"] == "+498941432469"
     assert "Rückruf" in hr
+
+
+def test_send_email_caller_name_in_header(client):
+    r = client.post("/tools/send_email", headers=_h(), json={
+        "category": "fibu", "subject": "S", "body": "B",
+        "caller_number": "+4989", "caller_name": "Herr Test, ACME AG"})
+    assert r.status_code == 200
+    assert _hrows(client)["Anrufer-Name"] == "Herr Test, ACME AG"
 
 
 def test_send_email_override_guard_rejects_hallucination(client):

@@ -106,6 +106,7 @@ class SendEmailReq(BaseModel):
     subject: str
     body: str
     caller_number: str = ""
+    caller_name: str = ""
     callback_requested: bool = False
     recipient_override: str | None = None
     call_id: str | None = None
@@ -137,6 +138,8 @@ async def send_email(req: SendEmailReq):
     header_rows = []
     if req.callback_requested:
         header_rows.append(("Rückruf", "Ja — bitte den Anrufer zurückrufen"))
+    if req.caller_name:
+        header_rows.append(("Anrufer-Name", req.caller_name))
     header_rows.append(("Anrufer", req.caller_number or "—"))
     ok, message_id = await email_service.send_email_raw(
         recipient, req.subject, req.body,
@@ -173,8 +176,10 @@ class CreateTicketReq(BaseModel):
     category: str
     summary: str
     caller_number: str = ""
+    caller_name: str = ""
     callback_requested: bool = False
     priority: str = "normal"
+    recipient_override: str | None = None
     call_id: str | None = None
 
 
@@ -190,22 +195,39 @@ async def create_ticket(req: CreateTicketReq):
     year = datetime.now(timezone.utc).year
     seq = await next_ticket_seq()
     ticket_id = tickets.format_ticket_id(year, seq)
+    # Empfänger: nennt der Anrufer eine Person, geht die Mail an DEREN (im
+    # Telefonbuch validierte) Adresse; sonst Kategorie-Route. Eine halluzinierte
+    # Override-Adresse wird ignoriert (nie an Fremdadressen senden), das Ticket
+    # bleibt trotzdem erhalten.
+    routing = recipients.merge_routing(await routing_config.load_overrides())
+    recipient = None
+    if req.recipient_override:
+        if recipients.validate_override(req.recipient_override, phonebook.all_emails()):
+            recipient = req.recipient_override
+        else:
+            logger.warning("create_ticket: recipient_override nicht im Telefonbuch — ignoriert")
+    if not recipient:
+        recipient = recipients.resolve_recipient(req.category, routing) \
+            or recipients.DEFAULT_ROUTING["verwaltung"]
+
     # Ticket gilt ab Record-Existenz als erstellt:
     await save_ticket({
         "ticket_id": ticket_id, "category": req.category, "summary": req.summary,
-        "caller_number": req.caller_number, "priority": req.priority,
-        "callback_requested": req.callback_requested,
+        "caller_number": req.caller_number, "caller_name": req.caller_name,
+        "priority": req.priority, "callback_requested": req.callback_requested,
+        "recipient": recipient,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
-    routing = recipients.merge_routing(await routing_config.load_overrides())
-    recipient = recipients.resolve_recipient(req.category, routing) \
-        or recipients.DEFAULT_ROUTING["verwaltung"]
     header_rows = [
         ("Ticket", ticket_id),
         ("Kategorie", req.category),
         ("Priorität", req.priority),
         ("Rückruf", "Ja — bitte den Anrufer zurückrufen" if req.callback_requested else "Nein"),
+    ]
+    if req.caller_name:
+        header_rows.append(("Anrufer-Name", req.caller_name))
+    header_rows += [
         ("Anrufer", req.caller_number or "—"),
         ("Zeitpunkt", datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")),
     ]
