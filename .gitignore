@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .env
 .coverage
+# Lokale, maschinenspezifische Claude-Code-Permissions (settings.json bleibt getrackt)
+.claude/settings.local.json
 # Generierte KB-Markdown-Artefakte (reproduzierbar via `uv run python -m kb_convert`)
 kb_fibu/
 # ElevenLabs-Agent-Dumps / RAG-Status (Scratchpad, können Tool-Auth-Header enthalten)
