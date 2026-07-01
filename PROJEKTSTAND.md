@@ -216,6 +216,8 @@ created_at:  timestamp
 | Funktion | Abwesenheit eintragen (Urlaub/Meeting/Abwesend/Dienstreise) mit Von–Bis |
 | Sofia-Integration | Abwesenheitscheck beim Anruf → Sofia informiert Anrufer automatisch |
 
+**Verdrahtung (01.07.2026):** Der Abwesenheitscheck läuft über den ElevenLabs **Conversation-Initiation-Webhook** — eine Workspace-Einstellung (`PATCH /v1/convai/settings` → `conversation_initiation_client_data_webhook = {url: …/tools/check_absence, request_headers: {X-Tool-Token}}`), plus am Agent `overrides.enable_conversation_initiation_client_data_from_webhook=true` und Default-Placeholder für `absence_active`/`absence_text`. Reproduzierbar/idempotent via `scripts/el_wire_absence_webhook.py` (Token aus Secret `tool-auth-token`). Backend-Endpoint `/tools/check_absence` unverändert (X-Tool-Token, kein HMAC).
+
 ### Sofia-Texte je Abwesenheitstyp
 ```
 Urlaub:      "Herr Müller ist im Urlaub und ab [Datum] wieder erreichbar."
