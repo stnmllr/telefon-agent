@@ -196,9 +196,18 @@ async def create_ticket(req: CreateTicketReq):
     routing = recipients.merge_routing(await routing_config.load_overrides())
     recipient = recipients.resolve_recipient(req.category, routing) \
         or recipients.DEFAULT_ROUTING["verwaltung"]
+    header_rows = [
+        ("Ticket", ticket_id),
+        ("Kategorie", req.category),
+        ("Priorität", req.priority),
+        ("Rückruf", "Ja — bitte den Anrufer zurückrufen" if req.callback_requested else "Nein"),
+        ("Anrufer", req.caller_number or "—"),
+        ("Zeitpunkt", datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")),
+    ]
     ok, message_id = await email_service.send_email_raw(
         recipient, f"Ticket {ticket_id}: {req.summary[:60]}", req.summary,
-        ticket_ref=ticket_id, callback=req.callback_requested)
+        ticket_ref=ticket_id, callback=req.callback_requested,
+        header_rows=header_rows)
 
     await finalize(req.call_id, "create_ticket", ticket_id=ticket_id,
                    recipient=recipient, message_id=message_id, email_sent=ok,

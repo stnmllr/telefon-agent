@@ -41,6 +41,50 @@ async def test_send_email_raw_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_email_raw_renders_header_rows(monkeypatch):
+    """Optionale header_rows erscheinen als Kopfblock in Text UND HTML, vor dem Body."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = __import__("json").loads(request.content)
+        return httpx.Response(200, json={"id": "re_h"})
+
+    monkeypatch.setattr(email_service, "RESEND_API_KEY", "re_live_key")
+    monkeypatch.setattr(email_service, "_client", _mock_client(handler))
+
+    ok, _ = await email_service.send_email_raw(
+        "a@b.de", "Betreff", "Der eigentliche Body-Text.",
+        ticket_ref="SOF-2026-000003",
+        header_rows=[("Ticket", "SOF-2026-000003"), ("Kategorie", "fibu")])
+
+    assert ok is True
+    text = captured["json"]["text"]
+    html = captured["json"]["html"]
+    assert "Ticket: SOF-2026-000003" in text
+    assert "Kategorie: fibu" in text
+    assert "Der eigentliche Body-Text." in text
+    assert "SOF-2026-000003" in html and "Kategorie" in html
+
+
+@pytest.mark.asyncio
+async def test_send_email_raw_no_header_rows_unchanged(monkeypatch):
+    """Ohne header_rows kein Kopfblock (send_email-Personenmail bleibt schlank)."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["json"] = __import__("json").loads(request.content)
+        return httpx.Response(200, json={"id": "re_n"})
+
+    monkeypatch.setattr(email_service, "RESEND_API_KEY", "re_live_key")
+    monkeypatch.setattr(email_service, "_client", _mock_client(handler))
+
+    ok, _ = await email_service.send_email_raw("a@b.de", "B", "Nur Body.")
+    assert ok is True
+    assert "Nur Body." in captured["json"]["text"]
+    assert "Kategorie" not in captured["json"]["text"]
+
+
+@pytest.mark.asyncio
 async def test_send_email_raw_strips_trailing_whitespace(monkeypatch):
     """Key mit Trailing \\r\\n darf den Authorization-Header NICHT zerstören."""
     captured = {}

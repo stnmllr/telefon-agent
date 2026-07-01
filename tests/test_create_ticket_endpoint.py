@@ -54,6 +54,29 @@ def test_create_ticket_success(client, monkeypatch):
     assert client._saved and client._saved[0]["ticket_id"] == body["ticket_id"]
 
 
+def test_create_ticket_email_carries_header_rows(client, monkeypatch):
+    """Die Ticket-Mail bekommt einen strukturierten Kopfblock mit den Kern-Feldern."""
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["subject"] = subject
+        captured["kwargs"] = k
+        return True, "msg-h"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "Fibu", "summary": "Kunde XY braucht Hilfe.",
+        "caller_number": "+4989123", "callback_requested": True, "priority": "hoch"})
+    assert r.status_code == 200
+    hr = dict(captured["kwargs"]["header_rows"])
+    assert hr["Ticket"].startswith("SOF-") and hr["Ticket"].endswith("000123")
+    assert hr["Kategorie"] == "Fibu"
+    assert hr["Priorität"] == "hoch"
+    assert hr["Anrufer"] == "+4989123"
+    assert "Rückruf" in hr and "Zeitpunkt" in hr
+
+
 def test_create_ticket_partial_fail_email(client, monkeypatch):
     async def _send_fail(*a, **k):
         return False, ""

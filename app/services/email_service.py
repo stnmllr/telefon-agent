@@ -222,19 +222,40 @@ async def send_email_raw(
     plain_body: str,
     ticket_ref: str | None = None,
     callback: bool = False,
+    header_rows: list[tuple[str, str]] | None = None,
 ) -> tuple[bool, str]:
     """Versendet eine vom Agenten formulierte E-Mail direkt (ohne RAG-Summary).
+
+    header_rows: optionaler strukturierter Kopfblock (Label, Wert), der VOR dem
+    Body in Text und HTML gerendert wird — z.B. Ticket-ID/Kategorie/Anrufer bei
+    create_ticket. Ohne header_rows bleibt die Mail schlank (Personen-Mail).
 
     Returns (ok, message_id).
     """
     full_subject = f"[{ticket_ref}] {subject}" if ticket_ref else subject
     callback_note = "\n*** RÜCKRUF ERBETEN ***\n" if callback else ""
-    plain = f"{callback_note}{plain_body}\n\n— Sofia, digitaler Assistent von Stephan Müller"
+
+    plain_header, html_header = "", ""
+    if header_rows:
+        plain_header = "\n".join(f"{label}: {value}" for label, value in header_rows) \
+            + "\n" + "─" * 42 + "\n\n"
+        rows_html = "".join(
+            f'<tr><td style="padding:4px 16px 4px 0;color:#888;white-space:nowrap">{label}</td>'
+            f'<td style="padding:4px 0;font-weight:bold">{value}</td></tr>'
+            for label, value in header_rows
+        )
+        html_header = (
+            '<table style="border-collapse:collapse;margin-bottom:16px;'
+            f'border-bottom:1px solid #eee;padding-bottom:8px">{rows_html}</table>'
+        )
+
+    plain = f"{callback_note}{plain_header}{plain_body}\n\n— Sofia, digitaler Assistent von Stephan Müller"
     html = (
         '<html><body style="font-family:Arial,sans-serif;color:#333">'
         + ('<div style="background:#c0392b;color:#fff;padding:8px 16px;font-weight:bold">'
            '&#128222; RÜCKRUF ERBETEN</div>' if callback else "")
-        + f'<div style="padding:16px;white-space:pre-wrap">{plain_body}</div>'
+        + f'<div style="padding:16px">{html_header}'
+        + f'<div style="white-space:pre-wrap">{plain_body}</div></div>'
         '<p style="font-size:12px;color:#888;padding:0 16px">'
         'Automatisch von Sofia generiert.</p></body></html>'
     )
