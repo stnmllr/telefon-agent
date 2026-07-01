@@ -54,3 +54,12 @@ def test_validate_override():
     assert validate_override("a@b.de", valid) is True
     assert validate_override("halluziniert@x.de", valid) is False
     assert validate_override("", valid) is False
+
+
+def test_fibu_absence_default_is_kuehn():
+    assert DEFAULT_ROUTING["fibu_absence"] == "kuehn@eevolution.de"
+
+
+def test_fibu_absence_override_wins():
+    merged = merge_routing({"fibu_absence": "neu@extern.de"})
+    assert merged["fibu_absence"] == "neu@extern.de"

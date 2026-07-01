@@ -8,6 +8,7 @@ DEFAULT_ROUTING: dict[str, str] = {
     "verwaltung": "Stephan.Mueller@sopra-system.com",
     "nachricht": "Stephan.Mueller@sopra-system.com",
     "fibu": "Stephan.Mueller@sopra-system.com",
+    "fibu_absence": "kuehn@eevolution.de",
 }
 
 
