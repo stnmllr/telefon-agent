@@ -161,6 +161,88 @@ def test_create_ticket_in_progress_returns_409(client, monkeypatch):
     assert saved_calls == []  # save_ticket must NOT have been called
 
 
+def test_fibu_ticket_reroutes_to_kuehn_when_absent(client, monkeypatch):
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    async def _absent():
+        return {"type": "urlaub", "start": "2026-07-01", "end": "2026-07-31"}
+    monkeypatch.setattr(tools_router, "get_active_absence_safe", _absent)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "fibu", "summary": "Ungelöste FIBU-Frage", "caller_number": "+49"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "kuehn@eevolution.de"
+    assert captured["kwargs"]["cc"] == ["Stephan.Mueller@sopra-system.com"]
+
+
+def test_fibu_ticket_normal_when_present(client, monkeypatch):
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    async def _present():
+        return None
+    monkeypatch.setattr(tools_router, "get_active_absence_safe", _present)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "fibu", "summary": "X"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "Stephan.Mueller@sopra-system.com"
+    assert captured["kwargs"].get("cc") is None
+
+
+def test_non_fibu_ticket_never_reroutes_even_if_absent(client, monkeypatch):
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    async def _absent():
+        return {"type": "urlaub", "start": "2026-07-01", "end": "2026-07-31"}
+    monkeypatch.setattr(tools_router, "get_active_absence_safe", _absent)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "it", "summary": "X"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "it-support@sopra-system.com"
+    assert captured["kwargs"].get("cc") is None
+
+
+def test_fibu_ticket_with_valid_override_goes_to_person_even_if_absent(client, monkeypatch):
+    """Gezielte Personenbitte gewinnt immer — kein Kühn-Reroute trotz Abwesenheit."""
+    captured = {}
+
+    async def _send(recipient, subject, body, **k):
+        captured["recipient"] = recipient
+        captured["kwargs"] = k
+        return True, "m"
+    monkeypatch.setattr(email_service, "send_email_raw", _send)
+
+    async def _absent():
+        return {"type": "urlaub", "start": "2026-07-01", "end": "2026-07-31"}
+    monkeypatch.setattr(tools_router, "get_active_absence_safe", _absent)
+
+    r = client.post("/tools/create_ticket", headers=_h(), json={
+        "category": "fibu", "summary": "X",
+        "recipient_override": "Severin.Schindler@sopra-system.com"})
+    assert r.status_code == 200
+    assert captured["recipient"] == "Severin.Schindler@sopra-system.com"
+    assert captured["kwargs"].get("cc") is None
+
+
 def test_create_ticket_done_duplicate_skips_creation(client, monkeypatch):
     """M4: reserve returns done dup -> return cached ticket_id, no seq/save."""
     seq_calls = []

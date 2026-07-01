@@ -62,7 +62,11 @@ async def finalize(call_id: str | None, tool: str, **fields) -> None:
 
 async def get_active_absence_safe() -> dict | None:
     from app.services.absence_service import get_active_absence
-    return await get_active_absence()
+    try:
+        return await get_active_absence()
+    except Exception as exc:  # Graceful: Abwesenheit unbekannt -> wie "nicht abwesend"
+        logger.warning("get_active_absence fehlgeschlagen: %s", exc)
+        return None
 
 
 # ── lookup_phonebook ─────────────────────────────────────────
@@ -201,21 +205,32 @@ async def create_ticket(req: CreateTicketReq):
     # bleibt trotzdem erhalten.
     routing = recipients.merge_routing(await routing_config.load_overrides())
     recipient = None
+    directed = False
     if req.recipient_override:
         if recipients.validate_override(req.recipient_override, phonebook.all_emails()):
             recipient = req.recipient_override
+            directed = True
         else:
             logger.warning("create_ticket: recipient_override nicht im Telefonbuch — ignoriert")
     if not recipient:
         recipient = recipients.resolve_recipient(req.category, routing) \
             or recipients.DEFAULT_ROUTING["verwaltung"]
 
+    # FIBU-Eskalation während Abwesenheit von Stephan -> an Vertretung (Kühn),
+    # Stephan im CC. NUR ohne gezielte Personenbitte (directed gewinnt immer);
+    # nur für category "fibu"; nie blockierend.
+    cc: list[str] | None = None
+    if not directed and req.category.strip().lower() == "fibu" and await get_active_absence_safe():
+        recipient = routing.get("fibu_absence") or recipients.DEFAULT_ROUTING["fibu_absence"]
+        cc = [recipients.resolve_recipient("fibu", routing)
+              or recipients.DEFAULT_ROUTING["fibu"]]
+
     # Ticket gilt ab Record-Existenz als erstellt:
     await save_ticket({
         "ticket_id": ticket_id, "category": req.category, "summary": req.summary,
         "caller_number": req.caller_number, "caller_name": req.caller_name,
         "priority": req.priority, "callback_requested": req.callback_requested,
-        "recipient": recipient,
+        "recipient": recipient, "cc": cc,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 
@@ -227,6 +242,9 @@ async def create_ticket(req: CreateTicketReq):
     ]
     if req.caller_name:
         header_rows.append(("Anrufer-Name", req.caller_name))
+    if cc:
+        header_rows.append(
+            ("Hinweis", "FIBU-Eskalation während Abwesenheit von Stephan Müller"))
     header_rows += [
         ("Anrufer", req.caller_number or "—"),
         ("Zeitpunkt", datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")),
@@ -234,7 +252,7 @@ async def create_ticket(req: CreateTicketReq):
     ok, message_id = await email_service.send_email_raw(
         recipient, f"Ticket {ticket_id}: {req.summary[:60]}", req.summary,
         ticket_ref=ticket_id, callback=req.callback_requested,
-        header_rows=header_rows)
+        header_rows=header_rows, cc=cc)
 
     await finalize(req.call_id, "create_ticket", ticket_id=ticket_id,
                    recipient=recipient, message_id=message_id, email_sent=ok,
