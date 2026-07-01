@@ -22,7 +22,7 @@ uv pip install -r requirements.txt
 ## Umgebung
 - In VS Code immer **Command Prompt** verwenden, nie PowerShell.
 - Pure-Logic-Kerne liegen unter `app/tools/` und dürfen kein I/O (Firestore/HTTP/
-  SendGrid) berühren — nur CSV-Read. So bleiben sie direkt unit-testbar.
+  Resend) berühren — nur CSV-Read. So bleiben sie direkt unit-testbar.
 
 ## Architektur
 Siehe `docs/superpowers/specs/2026-06-22-elevenlabs-tool-backend-design.md`.

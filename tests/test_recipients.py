@@ -35,8 +35,39 @@ def test_resolve_phonebook_is_none():
     assert resolve_recipient("phonebook", DEFAULT_ROUTING) is None
 
 
+def test_resolve_recipient_case_insensitive():
+    # ElevenLabs-LLM schickt die Kategorie großgeschrieben ("Fibu"), die
+    # Routing-Keys sind aber klein. Das darf den Empfänger nicht auf None kippen.
+    assert resolve_recipient("Fibu", DEFAULT_ROUTING) == "Stephan.Mueller@sopra-system.com"
+    assert resolve_recipient("FIBU", DEFAULT_ROUTING) == "Stephan.Mueller@sopra-system.com"
+    assert resolve_recipient("ERP", DEFAULT_ROUTING) == DEFAULT_ROUTING["erp"]
+    assert resolve_recipient("  Hr  ", DEFAULT_ROUTING) == DEFAULT_ROUTING["hr"]
+
+
+def test_resolve_unknown_category_still_none():
+    assert resolve_recipient("Quatsch", DEFAULT_ROUTING) is None
+    assert resolve_recipient("Phonebook", DEFAULT_ROUTING) is None
+
+
 def test_validate_override():
     valid = {"a@b.de", "c@d.de"}
     assert validate_override("a@b.de", valid) is True
     assert validate_override("halluziniert@x.de", valid) is False
     assert validate_override("", valid) is False
+
+
+def test_fibu_absence_default_is_kuehn():
+    assert DEFAULT_ROUTING["fibu_absence"] == "kuehn@eevolution.de"
+
+
+def test_fibu_absence_override_wins():
+    merged = merge_routing({"fibu_absence": "neu@extern.de"})
+    assert merged["fibu_absence"] == "neu@extern.de"
+
+
+def test_fibu_absence_not_resolvable_as_category():
+    # Interner Reroute-Key darf NIE als Agenten-Kategorie auflösen (sonst Bypass
+    # des Abwesenheits-Checks). Editierbar bleibt er über merge_routing.
+    assert resolve_recipient("fibu_absence", DEFAULT_ROUTING) is None
+    assert resolve_recipient("FIBU_ABSENCE", DEFAULT_ROUTING) is None
+    assert resolve_recipient("  fibu_absence  ", DEFAULT_ROUTING) is None

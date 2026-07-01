@@ -8,6 +8,7 @@ DEFAULT_ROUTING: dict[str, str] = {
     "verwaltung": "Stephan.Mueller@sopra-system.com",
     "nachricht": "Stephan.Mueller@sopra-system.com",
     "fibu": "Stephan.Mueller@sopra-system.com",
+    "fibu_absence": "kuehn@eevolution.de",
 }
 
 
@@ -25,9 +26,25 @@ def merge_routing(overrides: dict | None) -> dict:
     return merged
 
 
+# Routing-Keys, die NUR intern verwendet werden (z.B. Abwesenheits-Reroute) und
+# NIE als vom Agenten wählbare Kategorie auflösen dürfen — sonst ließe sich der
+# Abwesenheits-Check umgehen (category="fibu_absence" -> direkt an Kühn).
+# Editierbar bleiben sie trotzdem (merge_routing / PWA).
+INTERNAL_ROUTING_KEYS = {"fibu_absence"}
+
+
 def resolve_recipient(category: str, routing: dict) -> str | None:
-    """Empfänger für eine Kategorie; `phonebook` ist override-only -> None."""
-    return routing.get(category)
+    """Empfänger für eine Kategorie; `phonebook`/interne Keys sind kein Category-Ziel -> None.
+
+    Case-insensitiv: das ElevenLabs-LLM schickt die Kategorie gern
+    großgeschrieben ("Fibu"), die Routing-Keys sind aber klein.
+    """
+    if not isinstance(category, str):
+        return None
+    key = category.strip().lower()
+    if key in INTERNAL_ROUTING_KEYS:
+        return None
+    return routing.get(key)
 
 
 def validate_override(email: str, valid_emails: set[str]) -> bool:

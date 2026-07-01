@@ -320,6 +320,14 @@
       margin-top: 8px;
       min-height: 18px;
     }
+
+    .tabbar { display: flex; gap: 8px; margin: 0 0 16px; }
+    .tab-btn {
+      flex: 1; padding: 12px; border: none; border-radius: 10px;
+      background: #eceff3; color: #555; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .tab-btn.active { background: #003366; color: #fff; }
+    .tab-view[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -355,6 +363,13 @@
     </div>
     <button class="btn-logout" onclick="logout()">Logout</button>
   </div>
+
+  <div class="tabbar">
+    <button class="tab-btn active" data-tab="abwesenheit" onclick="showTab('abwesenheit')">Abwesenheit</button>
+    <button class="tab-btn" data-tab="adressen" onclick="showTab('adressen')">Team-Adressen</button>
+  </div>
+
+  <div id="tab-abwesenheit" class="tab-view">
 
   <!-- Neue Abwesenheit -->
   <div class="card">
@@ -400,6 +415,10 @@
     <div id="absence-list"><div class="empty-state"><div class="empty-emoji">✅</div>Keine Abwesenheiten eingetragen</div></div>
   </div>
 
+  </div><!-- /tab-abwesenheit -->
+
+  <div id="tab-adressen" class="tab-view" hidden>
+
   <!-- Empfänger-Settings -->
   <div class="card" id="routing-settings">
     <div class="card-title">Empfänger</div>
@@ -408,6 +427,8 @@
     <button class="btn-routing-save" id="routing-save">Speichern</button>
     <span class="routing-status" id="routing-status"></span>
   </div>
+
+  </div><!-- /tab-adressen -->
 
 </div>
 
@@ -438,6 +459,11 @@ async function init() {
   } catch {
     document.getElementById("login-screen").removeAttribute("hidden");
   }
+}
+
+function showTab(tab) {
+  document.querySelectorAll(".tab-view").forEach(v => { v.hidden = (v.id !== "tab-" + tab); });
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
 }
 
 function setDefaultDates() {
@@ -596,6 +622,12 @@ async function deleteAbsence(id) {
 }
 
 // ── Empfänger-Routing laden ───────────────────────────────────
+const ROUTING_LABELS = {
+  erp: "ERP-Support", evs: "EVS-Support", hr: "HR-Support", it: "IT-Support",
+  verwaltung: "Verwaltung / Verträge", nachricht: "Nachricht (Sofia)",
+  fibu: "FIBU", fibu_absence: "FIBU-Eskalation bei Abwesenheit",
+};
+
 async function loadRouting() {
   const res = await fetch("/app/api/routing", { credentials: "include" });
   if (!res.ok) return;
@@ -606,7 +638,7 @@ async function loadRouting() {
     const row = document.createElement("div");
     row.className = "routing-row";
     row.innerHTML =
-      `<label>${cat}</label>` +
+      `<label>${ROUTING_LABELS[cat] || cat}</label>` +
       `<input type="email" data-cat="${cat}" value="${routing[cat]}">`;
     list.appendChild(row);
   });

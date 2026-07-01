@@ -16,8 +16,10 @@ def client(monkeypatch):
 
     sent = []
 
-    async def _fake_send(recipient, subject, body, ticket_ref=None, callback=False):
-        sent.append({"recipient": recipient, "ticket_ref": ticket_ref})
+    async def _fake_send(recipient, subject, body, ticket_ref=None, callback=False,
+                         header_rows=None):
+        sent.append({"recipient": recipient, "ticket_ref": ticket_ref,
+                     "header_rows": header_rows, "callback": callback})
         return True, "msg-1"
     monkeypatch.setattr(email_service, "send_email_raw", _fake_send)
 
@@ -39,12 +41,36 @@ def _h():
     return {"X-Tool-Token": "secret"}
 
 
+def _hrows(client):
+    return dict(client._sent[0]["header_rows"])
+
+
 def test_send_email_category_routing(client):
     r = client.post("/tools/send_email", headers=_h(), json={
         "category": "erp", "subject": "S", "body": "B"})
     assert r.status_code == 200
     assert r.json()["recipient"] == "erp-support@sopra-system.com"
     assert r.json()["sent"] is True
+
+
+def test_send_email_includes_caller_header(client):
+    """Die Personen-Mail muss die Anrufer-Nummer als Kopfblock tragen, damit der
+    Empfänger weiß, wen er zurückrufen soll."""
+    r = client.post("/tools/send_email", headers=_h(), json={
+        "category": "fibu", "subject": "S", "body": "B",
+        "caller_number": "+498941432469", "callback_requested": True})
+    assert r.status_code == 200
+    hr = dict(client._sent[0]["header_rows"])
+    assert hr["Anrufer"] == "+498941432469"
+    assert "Rückruf" in hr
+
+
+def test_send_email_caller_name_in_header(client):
+    r = client.post("/tools/send_email", headers=_h(), json={
+        "category": "fibu", "subject": "S", "body": "B",
+        "caller_number": "+4989", "caller_name": "Herr Test, ACME AG"})
+    assert r.status_code == 200
+    assert _hrows(client)["Anrufer-Name"] == "Herr Test, ACME AG"
 
 
 def test_send_email_override_guard_rejects_hallucination(client):
