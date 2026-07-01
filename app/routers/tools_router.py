@@ -134,9 +134,14 @@ async def send_email(req: SendEmailReq):
         raise HTTPException(status_code=409, detail="request already being processed")
 
     recipient = await _resolve_recipient(req)
+    header_rows = []
+    if req.callback_requested:
+        header_rows.append(("Rückruf", "Ja — bitte den Anrufer zurückrufen"))
+    header_rows.append(("Anrufer", req.caller_number or "—"))
     ok, message_id = await email_service.send_email_raw(
         recipient, req.subject, req.body,
-        ticket_ref=req.ticket_ref, callback=req.callback_requested)
+        ticket_ref=req.ticket_ref, callback=req.callback_requested,
+        header_rows=header_rows)
     await finalize(req.call_id, "send_email", recipient=recipient,
                    message_id=message_id, email_sent=ok,
                    category=req.category, caller_number=req.caller_number)
