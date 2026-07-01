@@ -1,17 +1,27 @@
 """
-Email Service — SendGrid Integration
+Email Service — Resend Integration
 Sendet Benachrichtigungs-E-Mails bei Anruf-Weiterleitungen.
+
+Versand über die Resend-HTTP-API (raw httpx, kein SDK). Der API-Key wird vor
+dem Header-Bau defensiv ge-strippt (CR/LF/Whitespace), damit ein Secret mit
+Trailing-Newline den Authorization-Header nicht zerstört. Im Fehlerfall werden
+ausschließlich Statuscode + Resend-Fehlertext geloggt — niemals der Key oder
+der Authorization-Header.
 """
 
 import os
 import logging
 from datetime import datetime
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+
+import httpx
+
 logger = logging.getLogger(__name__)
 
-SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "ki-agent@sopra-system.com")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_URL = "https://api.resend.com/emails"
+# Absender muss eine in Resend verifizierte Domain sein. Default = Resend-Sandbox
+# für lokale Tests; produktiv via EMAIL_FROM (z.B. sofia@stnmllr.com) gesetzt.
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "onboarding@resend.dev")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Sofia – Assistent Stephan Müller")
 
 CATEGORY_EMAILS = {
@@ -22,6 +32,56 @@ CATEGORY_EMAILS = {
     "verwaltung": ("Verwaltung",    "Stephan.Mueller@sopra-system.com"),
     "nachricht":  ("Stephan Müller", "Stephan.Mueller@sopra-system.com"),
 }
+
+
+def _client() -> httpx.AsyncClient:
+    """Test-Seam: in Tests durch einen Client mit MockTransport ersetzt."""
+    return httpx.AsyncClient(timeout=15.0)
+
+
+async def _resend_send(
+    recipient_email: str,
+    subject: str,
+    html_body: str,
+    text_body: str,
+) -> tuple[bool, str]:
+    """Versendet eine E-Mail über die Resend-API. Returns (ok, message_id)."""
+    key = RESEND_API_KEY.strip()
+    if not key:
+        logger.warning("RESEND_API_KEY nicht gesetzt — E-Mail wird nicht gesendet")
+        return False, ""
+
+    payload = {
+        "from": f"{EMAIL_FROM_NAME} <{EMAIL_FROM}>",
+        "to": [recipient_email],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+    }
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with _client() as c:
+            r = await c.post(RESEND_URL, headers=headers, json=payload)
+    except Exception as e:
+        # NICHT str(e)/e loggen — könnte den Authorization-Header inkl. Key enthalten.
+        logger.error("Resend-Request fehlgeschlagen: %s", type(e).__name__)
+        return False, ""
+
+    if r.status_code in (200, 201):
+        try:
+            message_id = (r.json() or {}).get("id", "")
+        except Exception:
+            message_id = ""
+        logger.info("E-Mail via Resend gesendet an %s (Status %d)",
+                    recipient_email, r.status_code)
+        return True, message_id
+
+    # r.text = Resend-Fehler-JSON (enthält den Key NICHT) → loggen ist sicher.
+    logger.error("Resend-Fehler: Status %d — %s", r.status_code, r.text[:300])
+    return False, ""
 
 
 async def send_routing_email(
@@ -50,10 +110,6 @@ async def send_routing_email(
     Returns:
         True bei Erfolg, False bei Fehler
     """
-    if not SENDGRID_API_KEY:
-        logger.warning("SENDGRID_API_KEY nicht gesetzt — E-Mail wird nicht gesendet")
-        return False
-
     if recipient_override:
         recipient_email = recipient_override
         team_name = team_name_override or "Empfänger"
@@ -156,28 +212,8 @@ KI-Telefon-Agent — SOPRA System GmbH
 </body></html>
 """
 
-    try:
-        message = Mail(
-            from_email=(EMAIL_FROM, EMAIL_FROM_NAME),
-            to_emails=recipient_email,
-            subject=subject,
-            plain_text_content=body,
-            html_content=html_body,
-        )
-
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
-        response = sg.send(message)
-
-        if response.status_code in (200, 202):
-            logger.info("E-Mail gesendet an %s (Status %d)", recipient_email, response.status_code)
-            return True
-        else:
-            logger.error("SendGrid Fehler: Status %d", response.status_code)
-            return False
-
-    except Exception as e:
-        logger.error("E-Mail senden fehlgeschlagen: %s", e)
-        return False
+    ok, _message_id = await _resend_send(recipient_email, subject, html_body, body)
+    return ok
 
 
 async def send_email_raw(
@@ -191,10 +227,6 @@ async def send_email_raw(
 
     Returns (ok, message_id).
     """
-    if not SENDGRID_API_KEY:
-        logger.warning("SENDGRID_API_KEY nicht gesetzt — E-Mail wird nicht gesendet")
-        return False, ""
-
     full_subject = f"[{ticket_ref}] {subject}" if ticket_ref else subject
     callback_note = "\n*** RÜCKRUF ERBETEN ***\n" if callback else ""
     plain = f"{callback_note}{plain_body}\n\n— Sofia, digitaler Assistent von Stephan Müller"
@@ -206,20 +238,4 @@ async def send_email_raw(
         '<p style="font-size:12px;color:#888;padding:0 16px">'
         'Automatisch von Sofia generiert.</p></body></html>'
     )
-    try:
-        message = Mail(
-            from_email=(EMAIL_FROM, EMAIL_FROM_NAME),
-            to_emails=recipient_email,
-            subject=full_subject,
-            plain_text_content=plain,
-            html_content=html,
-        )
-        response = SendGridAPIClient(SENDGRID_API_KEY).send(message)
-        ok = response.status_code in (200, 202)
-        message_id = response.headers.get("X-Message-Id", "") if ok else ""
-        if not ok:
-            logger.error("SendGrid Fehler: Status %d", response.status_code)
-        return ok, message_id
-    except Exception as e:
-        logger.error("send_email_raw fehlgeschlagen: %s", e)
-        return False, ""
+    return await _resend_send(recipient_email, full_subject, html, plain)

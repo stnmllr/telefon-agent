@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # Secrets wie ELEVENLABS_API_KEY / RESEND_API_KEY / SENDGRID_API_KEY liegen
+        # in .env, werden aber direkt über os.environ gelesen (nicht als Settings-
+        # Feld). Unmodellierte Keys daher ignorieren statt den Start zu sprengen.
+        extra = "ignore"
 
 
 settings = Settings()

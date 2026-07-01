@@ -5,3 +5,5 @@ __pycache__/
 .coverage
 # Generierte KB-Markdown-Artefakte (reproduzierbar via `uv run python -m kb_convert`)
 kb_fibu/
+# ElevenLabs-Agent-Dumps / RAG-Status (Scratchpad, können Tool-Auth-Header enthalten)
+scratchpad_el/

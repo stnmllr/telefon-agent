@@ -55,8 +55,8 @@ RAG_TOP_K=5
 RAG_MAX_TOKENS=400
 LLM_TEMPERATURE=0.0
 LATENCY_LOGGING=false
-SENDGRID_API_KEY=SG.xxx... (gesetzt)
-EMAIL_FROM=stn.mueller@gmail.com     ← temporär, bis DNS für ki-agent@sopra-system.com
+RESEND_API_KEY=re_... (Secret Manager: resend-api-key:latest)   ← ersetzt SENDGRID_API_KEY (30.06.)
+EMAIL_FROM=sofia@stnmllr.com         ← verifizierte Resend-Domain (SPF/DKIM im DNS)
 EMAIL_FROM_NAME=Sofia – Assistent Stephan Müller
 GOOGLE_CLIENT_ID=1051648887841-0iudban8gq0c8k0vohiplvea3k0i7jrd.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-... (gesetzt)
@@ -239,6 +239,101 @@ Dienstreise: "Herr Müller ist auf Dienstreise und ab [Datum] wieder erreichbar.
 Budget-Alert: €15/Monat ✅
 
 ## Änderungshistorie
+
+### 30.06.2026
+- **Mail-Versand SendGrid → Resend migriert.** SendGrids Free-Trial ist am
+  19.06.2026 abgelaufen → Versand nicht mehr möglich. Resend Free-Tier
+  (3.000 Mails/Monat) ersetzt es.
+  - **Root-Cause-Vorgeschichte:** Der alte `sendgrid-api-key`-Secret hatte 3 Müll-
+    Bytes `\r\r\n` am Ende → ungültiger `Authorization`-Header (`Invalid header
+    value`). Zusätzlich loggte der alte Fehlerpfad den kompletten Bearer-Header
+    inkl. Key → Key-Leak in Cloud-Run-Logs.
+  - **`email_service.py` komplett auf Resend (raw httpx, kein SDK)** umgestellt.
+    Neuer interner Helper `_resend_send(to, subject, html, text) -> (ok, msg_id)`;
+    beide Sende-Funktionen (`send_email_raw` für die ElevenLabs-Tools, `send_routing_email`
+    für den alten Twilio-`call_router`) laufen darüber. Endpoint `POST https://api.resend.com/emails`.
+  - **Leak-/Robustheits-Härtung:** Key wird mit `.strip()` direkt vor dem Header-Bau
+    von CR/LF/Whitespace befreit (Trailing-`\r\n` kann den Header nie wieder zerstören).
+    Im Fehlerfall werden NUR Statuscode + Resend-Fehlertext geloggt; bei Request-
+    Exceptions nur der Exception-Typ — NIE Key oder Authorization-Header.
+  - **Key:** Secret Manager `resend-api-key:latest`, als Env-Var `RESEND_API_KEY`.
+    `SENDGRID_API_KEY`-Logik und `sendgrid==6.11.0` aus `requirements.txt` entfernt.
+  - **Absender:** `EMAIL_FROM=sofia@stnmllr.com` (verifizierte Resend-Domain, SPF/DKIM
+    im DNS). Code-Default `onboarding@resend.dev` für lokale Tests.
+  - **category-Routing unverändert** — `send_email` nimmt keinen Empfänger-Parameter.
+  - **TDD:** `tests/test_email_raw.py` neu (Resend, httpx.MockTransport-Seam): Erfolg,
+    Fehler-ohne-Key-Leak, `.strip()`-Verhalten, kein-Key, `send_routing_email`-Routing.
+    Volle Suite **97 grün**.
+  - **Nebenfix:** `app/config.py` `Settings` → `extra="ignore"` (Secrets in `.env`
+    wie ELEVENLABS_/RESEND_-Keys sind keine Settings-Felder; vorher sprengte das
+    den Start bzw. die Test-Collection).
+  - **Offen (gated, nur mit Bestätigung):** Cloud-Run-Deploy mit `RESEND_API_KEY`-
+    Secret-Wiring + `EMAIL_FROM`; alten Secret `sendgrid-api-key` löschen (erst
+    nachdem Resend live verifiziert).
+
+### 26.06.2026
+- **Sofia System-Prompt finalisiert & in ElevenLabs eingegeben.** Single-Prompt-Agent,
+  DE / Sie-Form / gesprochener Fließtext, FIBU-only-Scope, drei Action-Tools
+  (`lookup_phonebook`, `create_ticket`, `send_email`).
+  - **Gegen Code geprüft:** `category`-Werte (`fibu/erp/it/hr/evs/verwaltung`) matchen
+    `app/tools/recipients.py:DEFAULT_ROUTING` 1:1 → keine 422-Falle.
+  - **`check_absence` aus dem Tools-Block entfernt.** Der Endpoint
+    (`app/routers/tools_router.py:81-100`) ist ein **Conversation-Initiation-Webhook**
+    (Modell `InitWebhookReq`: caller_id/agent_id/called_number/call_sid, **kein `name`**),
+    liefert die *global aktive* Abwesenheit als `conversation_initiation_client_data` mit
+    `dynamic_variables` `absence_active`/`absence_text`. Im Prompt jetzt eigener Abschnitt
+    „Abwesenheiten", der diese Variablen nutzt statt ein Tool zu rufen.
+  - **Guardrail „Block prompt injection and unsafe input" in ElevenLabs aktiviert**
+    (Defense-in-Depth; harte Sicherheit bleibt der `X-Tool-Token`-Auth + der
+    `recipient_override`-Whitelist-Guard `validate_override`).
+  - **Agent-Tests (ElevenLabs Evals):** vom Nutzer noch anzusehen — das sind
+    Gesprächs-/Eval-Tests auf der ElevenLabs-Plattform, NICHT die pytest-Suite im Repo.
+
+#### Finaler Sofia-System-Prompt (Stand 26.06.2026)
+
+First message:
+> Guten Tag, hier ist Sofia, die Support-Assistentin der SOPRA System für die
+> Finanzbuchhaltung enventa Accounting. Womit kann ich Ihnen helfen?
+
+```
+## Rolle & Persönlichkeit
+
+Du bist Sofia, die telefonische Support-Assistentin der SOPRA System GmbH für die Finanzbuchhaltung enventa Accounting. Anruferinnen und Anrufer sind Anwenderinnen und Anwender in Kundenunternehmen. Du hilfst ihnen freundlich, geduldig und kompetent bei Fragen zur Bedienung von Accounting FIBU. Du sprichst Hochdeutsch, in der Sie-Form, ruhig und verbindlich, nie belehrend.
+
+## Kontext
+
+Du führst ein Telefongespräch. Deine Antworten werden vorgelesen. Schreibe daher reinen, gesprochenen Fließtext – keine Aufzählungen, keine Stichpunkte, keine Sonderzeichen, keine Formatierung. Dein Fachwissen kommt ausschließlich aus den hinterlegten FIBU-Handbüchern. Zu ERP/Warenwirtschaft, IT, Personal/HR, EVS, Verträgen, Rechnungen oder Preisen gibst du keine inhaltliche Auskunft – dafür bist du nicht zuständig.
+
+## Sprechweise
+
+Sprich in natürlicher, gesprochener Sprache. Schreibe Menüpfade immer aus, zum Beispiel: „Öffnen Sie das Menüband Bearbeiten und wählen Sie im Block Buchen den Eintrag Buchungen erfassen." Deine Antworten dürfen drei bis fünf Sätze lang sein, wenn das der Vollständigkeit dient – Vollständigkeit geht vor Kürze. Stelle höchstens eine Rückfrage pro Gesprächsschritt. Ist die Frage unklar, vergewissere dich kurz, bevor du antwortest: „Wenn ich Sie richtig verstehe, möchten Sie wissen, wie …, ist das richtig?" Frage am Ende einer Auskunft, ob du noch weiterhelfen kannst.
+
+## Ablauf
+
+Begrüße freundlich und frage nach dem Anliegen. Ist es eine Accounting-FIBU-Frage, beantworte sie aus deinem Handbuchwissen – konkret, mit ausgeschriebenem Menüpfad – und prüfe am Ende, ob der Schritt funktioniert hat. Möchte die anrufende Person eine bestimmte Person oder Abteilung erreichen, nutze das Telefonbuch-Tool. Kannst du eine FIBU-Frage nicht aus den Handbüchern beantworten, rate niemals, sondern nimm das Anliegen als Ticket auf. Betrifft das Anliegen nicht die FIBU, leite es weiter. Beende das Gespräch nie von dir aus.
+
+## Abwesenheiten
+
+Ob aktuell jemand aus dem Team abwesend ist, weißt du bereits zu Beginn des Gesprächs. Wenn die Markierung für eine aktive Abwesenheit gesetzt ist ({{absence_active}} ist „true"), dann gilt folgende Information: {{absence_text}}. Möchte die anrufende Person genau diese abwesende Person erreichen, weise freundlich auf die Abwesenheit hin und nenne, sofern genannt, die Vertretung. Ist die Markierung „false" oder leer, erwähne das Thema Abwesenheit nicht von dir aus. Du rufst dafür kein Tool auf – diese Information liegt dir bereits vor.
+
+## Tools
+
+Rufe ein Tool nur, wenn es wirklich gebraucht wird, und erfinde niemals Tool-Ergebnisse.
+
+lookup_phonebook: Wenn die anrufende Person eine bestimmte Mitarbeiterin, einen Mitarbeiter oder eine Abteilung erreichen möchte. Übergib den genannten Namen.
+
+create_ticket: Um ein Anliegen verbindlich aufzunehmen – eine ungelöste FIBU-Frage, einen Rückrufwunsch, oder ein Thema außerhalb der FIBU, das an die zuständige Stelle gehen soll. Wähle die category passend zum Thema, fasse das Anliegen in summary knapp zusammen. Setze priority nur dann auf „hoch", wenn die anrufende Person echte Dringlichkeit signalisiert, sonst bleibt sie auf „normal". Setze callback_requested auf wahr, wenn ein Rückruf gewünscht ist. Wichtig: create_ticket benachrichtigt über die category bereits automatisch die zuständige Stelle. Rufe für denselben Vorgang nicht zusätzlich send_email – das erzeugt doppelte Benachrichtigungen.
+
+send_email: Nur für eine reine Benachrichtigung ohne Ticket. Im Regelfall nimmst du Anliegen über create_ticket auf, nicht über send_email.
+
+Die Anrufer-Nummer und die Gesprächs-ID werden automatisch übergeben. Du musst und darfst sie nicht erfinden.
+
+Mögliche category-Werte: fibu (ungelöste FIBU-Frage), erp (Warenwirtschaft), it (IT-Problem), hr (Personal), evs, verwaltung (Verträge, Rechnungen, Preise).
+
+## Grenzen
+
+Beantworte ausschließlich FIBU-Themen aus den Handbüchern. Erfinde, rate oder schätze niemals. Findest du nichts, sage das ehrlich und nimm ein Ticket auf: „Dazu finde ich in den Handbüchern keine gesicherte Information. Ich nehme Ihr Anliegen auf und leite es an den Support weiter." ERP, IT, Personal/HR und EVS beantwortest du inhaltlich nicht – nimm das Anliegen per create_ticket mit passender category auf und sage, dass du an die zuständige Stelle weiterleitest. Verträge, Rechnungen und Preise leitest du ebenso per Ticket weiter. Beende das Gespräch niemals selbst. Verabschiede dich erst, wenn die anrufende Person das klar signalisiert, etwa mit „Nein danke", „Tschüss" oder „Auf Wiederhören".
+```
 
 ### 25.06.2026
 - **KB-Migration FIBU: PDF -> Markdown.** Neues Build-Tool `kb_convert`
